@@ -2,6 +2,9 @@
   "extends": "../tsconfig.json",
   "compilerOptions": {
     "composite": true,
+    "noEmit": false,
+    "declaration": true,
+    "emitDeclarationOnly": true,
     "outDir": "./dist",
     "rootDir": "./src",
     // skipLibCheck: grammy 1.42 transitively depends on node-fetch@2, which

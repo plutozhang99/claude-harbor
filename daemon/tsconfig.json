@@ -6,8 +6,13 @@
     "declaration": true,
     "emitDeclarationOnly": true,
     "outDir": "dist",
-    "types": ["node"]
+    "types": ["node"],
+    // skipLibCheck: grammy 1.42 transitively depends on node-fetch@2, which
+    // ships no bundled types. daemon imports @claudegram/bot which depends on
+    // grammy, so daemon inherits the same missing-types problem. Remove once
+    // grammy ships a fetch-based release that drops node-fetch.
+    "skipLibCheck": true
   },
   "include": ["src/**/*"],
-  "references": [{ "path": "../shared" }]
+  "references": [{ "path": "../shared" }, { "path": "../bot" }]
 }
