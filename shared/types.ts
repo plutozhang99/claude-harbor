@@ -70,6 +70,7 @@ export type DaemonErrorCode =
   | 'SESSION_NOT_FOUND'
   | 'DECISION_NOT_FOUND'
   | 'DAEMON_UNREACHABLE'
+  | 'VALIDATION_ERROR'
   | 'INTERNAL_ERROR';
 
 export interface ErrorResponse {
