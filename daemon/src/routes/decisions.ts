@@ -36,7 +36,12 @@ export function createDecisionRoutes(queue: DecisionQueue, registry: SessionRegi
   const app = new Hono()
 
   app.onError((err, c) => {
-    console.error('[decisions] unhandled error:', err)
+    // Avoid logging the raw error object (may include stack/internals) — log
+    // only the narrowed message.
+    console.error(
+      '[decisions] handler error:',
+      err instanceof Error ? err.message : String(err),
+    )
     const body: ErrorResponse = { error: 'INTERNAL_ERROR', message: 'Internal server error.' }
     return c.json(body, 500)
   })
@@ -47,7 +52,10 @@ export function createDecisionRoutes(queue: DecisionQueue, registry: SessionRegi
     try {
       body = await c.req.json()
     } catch (parseErr) {
-      console.error('[decisions] failed to parse request body:', parseErr)
+      console.error(
+        '[decisions] failed to parse request body:',
+        parseErr instanceof Error ? parseErr.message : String(parseErr),
+      )
       const err: ErrorResponse = {
         error: 'VALIDATION_ERROR',
         message: 'Invalid JSON body.',
@@ -97,7 +105,8 @@ export function createDecisionRoutes(queue: DecisionQueue, registry: SessionRegi
     }
 
     const requestId = parsed.data as RequestId
-    const decision = await queue.poll(requestId, 30_000)
+    // Pass the request's AbortSignal so the poller is cleaned up on client disconnect (Option A).
+    const decision = await queue.poll(requestId, 30_000, c.req.raw.signal)
 
     if (decision === undefined) {
       const err: ErrorResponse = {

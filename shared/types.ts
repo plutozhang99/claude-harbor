@@ -78,10 +78,12 @@ export interface ErrorResponse {
   message: string;
 }
 
-/** Typed result wrapper for fallible daemon operations. */
-export type Result<T> =
+/** Typed result wrapper for fallible operations.
+ *  E defaults to ErrorResponse for daemon operations; use a narrower error type
+ *  for protocol-level parsing (e.g. CallbackParseError from @claudegram/shared/protocol). */
+export type Result<T, E = ErrorResponse> =
   | { ok: true;  data:  T }
-  | { ok: false; error: ErrorResponse };
+  | { ok: false; error: E };
 
 // ─── HTTP API — Sessions ──────────────────────────────────────────────────────
 

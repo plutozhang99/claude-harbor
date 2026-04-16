@@ -2,10 +2,12 @@
   "name": "@claudegram/shared",
   "version": "0.1.0",
   "type": "module",
+  "//": "Decision: @claudegram/shared is consumed exclusively by Bun-runtime workspaces (daemon, channel-server). Bun resolves the 'bun' condition and loads the .ts source directly. The 'default' fallback intentionally points at the same TS source — there is no Node consumer today, and we deliberately do not maintain a compiled dist/index.js to avoid a stale-build hazard. If a Node consumer is ever added, build a dist/index.js and switch 'default' to it.",
   "exports": {
     ".": {
-      "types": "./dist/types.d.ts",
-      "default": "./types.ts"
+      "types": "./dist/index.d.ts",
+      "bun": "./index.ts",
+      "default": "./index.ts"
     }
   }
 }
