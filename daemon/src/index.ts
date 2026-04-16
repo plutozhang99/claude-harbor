@@ -1,11 +1,14 @@
 import { Hono } from 'hono'
 import { acquirePidLock, releasePidLock } from './pid'
 import { SessionRegistry } from './registry'
+import { DecisionQueue } from './queue'
 import { createSessionRoutes } from './routes/sessions'
+import { createDecisionRoutes } from './routes/decisions'
 import type { HealthResponse, ErrorResponse } from '@claudegram/shared'
 
 const PORT = parseInt(process.env.CLAUDEGRAM_PORT ?? '3582', 10)
 const registry = new SessionRegistry()
+const queue = new DecisionQueue()
 
 // Acquire PID lock — exit immediately if the daemon is already running
 try {
@@ -18,6 +21,7 @@ try {
 
 // Graceful shutdown handlers
 function shutdown(): void {
+  queue.destroy()
   releasePidLock()
   process.exit(0)
 }
@@ -30,13 +34,16 @@ const app = new Hono()
 // Mount session routes
 app.route('/api/sessions', createSessionRoutes(registry))
 
+// Mount decision routes
+app.route('/api/decisions', createDecisionRoutes(queue, registry))
+
 // GET /api/health
 app.get('/api/health', (c) => {
   const body: HealthResponse = {
     ok: true,
     uptime: registry.uptimeSeconds(),
     sessions: registry.getAll().length,
-    pendingDecisions: 0, // Phase 1C will fill this in
+    pendingDecisions: queue.pendingCount(),
   }
   return c.json(body)
 })
