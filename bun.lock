@@ -26,6 +26,10 @@
       "dependencies": {
         "@claudegram/shared": "workspace:*",
         "@modelcontextprotocol/sdk": "^1.0.0",
+        "zod": "^3.23.0",
+      },
+      "devDependencies": {
+        "@types/node": "^25.6.0",
       },
     },
     "daemon": {

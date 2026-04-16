@@ -8,6 +8,10 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.0",
-    "@claudegram/shared": "workspace:*"
+    "@claudegram/shared": "workspace:*",
+    "zod": "^3.23.0"
+  },
+  "devDependencies": {
+    "@types/node": "^25.6.0"
   }
 }

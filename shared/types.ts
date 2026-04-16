@@ -58,10 +58,13 @@ export type Decision =
 
 // ─── Permission verdict (channel-server → Claude Code) ───────────────────────
 
-export interface PermissionVerdict {
-  requestId: RequestId;
-  behavior:  PermissionBehavior;
-}
+/** Discriminated union returned by the channel-server to Claude Code.
+ *  - `allow`  → proceed without prompting
+ *  - `deny`   → block the operation; optional `reason` surfaced to the user
+ */
+export type PermissionVerdict =
+  | { readonly behavior: 'allow' }
+  | { readonly behavior: 'deny'; readonly reason?: string }
 
 // ─── Error types ─────────────────────────────────────────────────────────────
 

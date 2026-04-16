@@ -10,6 +10,31 @@ export type PermissionOptionId = (typeof PERMISSION_OPTION_IDS)[number]
 export const PERMISSION_CATEGORIES = ['file_edit', 'bash', 'mcp_tool'] as const
 export type PermissionCategory = (typeof PERMISSION_CATEGORIES)[number]
 
+// ─── Permission notification (Claude Code → channel-server) ───────────────────
+
+/**
+ * Validated payload of a `claude/channel/permission` MCP notification, after
+ * the channel-server has parsed it. Shared between:
+ *   - channel-server (Phase 2A): receives and validates
+ *   - channel-server (Phase 2B): forwards to daemon as a CreateDecisionRequest
+ *   - bot (Phase 3B): renders title/description in the Telegram message
+ *
+ * Defined here so all three phases reference a single source of truth.
+ *
+ * Field budgets (enforced by parsePermissionNotification at the boundary):
+ *   - title       ≤  256 chars
+ *   - description ≤ 4096 chars
+ *   - toolName    ≤  128 chars
+ *   - sessionId   ≤  128 chars
+ */
+export interface PermissionNotification {
+  readonly category: PermissionCategory
+  readonly title: string
+  readonly description: string
+  readonly toolName?: string
+  readonly sessionId?: string
+}
+
 // ─── Telegram callback_data encoding ─────────────────────────────────────────
 
 /** Prefix that identifies a Claudegram callback payload. */
