@@ -1,0 +1,11 @@
+{
+  "name": "@claudegram/shared",
+  "version": "0.1.0",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/types.d.ts",
+      "default": "./types.ts"
+    }
+  }
+}

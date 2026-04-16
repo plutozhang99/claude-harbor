@@ -1,0 +1,13 @@
+{
+  "name": "claudegram",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": ["shared", "daemon", "channel-server"],
+  "devDependencies": {
+    "typescript": "^5.4.0"
+  },
+  "scripts": {
+    "typecheck": "tsc -b",
+    "typecheck:clean": "tsc -b --clean"
+  }
+}
