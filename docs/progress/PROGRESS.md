@@ -3,7 +3,7 @@
 ## Spec Files
 - docs/PRD.md
 
-## Current Phase: Phase 2C (sequential; 3C follows)
+## Current Phase: Phase 3C — bot commands
 
 ## Interruption Reason
 
@@ -23,9 +23,9 @@
 Teams: available (not used — parallel Agent calls preferred for independent workspaces)
 
 ## Active Task
-Phase 2C — Session register handshake (channel-server POST /api/sessions on boot, DELETE on shutdown) + replace ephemeral sessionId + registry EventEmitter + bot subscribes for "Session registered/ended" Telegram notifications
-Sub-task progress: not started; 2C and 3C run sequentially (both touch bot/index.ts + daemon/registry)
-Relevant files: channel-server/src/index.ts, channel-server/src/relay.ts, daemon/src/registry.ts, daemon/src/routes/sessions.ts, bot/src/queue-port.ts, bot/src/index.ts
+Phase 3C — Bot commands: /sessions (list active), /pending (list pending decisions), /cancel <id>, /cancel_all
+Sub-task progress: not started
+Relevant files: daemon/src/queue.ts (add getPending if missing), bot/src/queue-port.ts (extend port), bot/src/index.ts (bot.command handlers), daemon/src/index.ts (registryPort.getActiveSessions)
 
 ## Completed Tasks
 - [x] Phase 1A: Bun workspace scaffolding + shared TypeScript types — commit: 0066cde — code ✅ sec ✅ func ✅ type ✅ err ✅

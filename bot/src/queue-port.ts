@@ -41,6 +41,17 @@ export interface DecisionQueuePort {
    * message.
    */
   answer(requestId: RequestId, optionId: string): Result<Decision, ErrorResponse>
+  /**
+   * Return all decisions currently in 'pending' status as read-only snapshots.
+   * Used by the /pending and /cancel commands to list or match pending decisions.
+   */
+  getPending(): readonly Decision[]
+  /**
+   * Cancel a pending decision. Returns the cancelled Decision snapshot on success
+   * so the /cancel command can display sessionName + title in its reply.
+   * Returns `ok: false` when the decision is not found.
+   */
+  cancel(requestId: RequestId): Result<Decision, ErrorResponse>
 }
 
 /**

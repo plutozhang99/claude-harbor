@@ -328,8 +328,17 @@ export class DecisionQueue {
     return { ok: true, data: answeredDecision }
   }
 
-  /** Cancel a decision (DELETE /api/decisions/:requestId). */
-  cancel(requestId: RequestId): Result<void> {
+  /** Cancel a decision (DELETE /api/decisions/:requestId).
+   *
+   * Returns `Result<Decision>` — the caller receives the full cancelled Decision
+   * snapshot, which the bot /cancel command uses to display sessionName + title.
+   * The HTTP DELETE route ignores `result.data` (returns 204), so this change is
+   * backward-compatible with that call site.
+   *
+   * Idempotency note: if the decision is already in a terminal state this still
+   * returns `ok: true` with the current snapshot.
+   */
+  cancel(requestId: RequestId): Result<Decision> {
     const m = this.decisions.get(requestId)
     if (!m) {
       const err: ErrorResponse = {
@@ -339,9 +348,9 @@ export class DecisionQueue {
       return { ok: false, error: err }
     }
 
-    // Idempotent — if already terminal, return ok
+    // Idempotent — if already terminal, return the current snapshot
     if (TERMINAL_STATUSES.has(m.status)) {
-      return { ok: true, data: undefined }
+      return { ok: true, data: this._toDecision(m) }
     }
 
     // Clear TTL timer
@@ -372,8 +381,9 @@ export class DecisionQueue {
     // Schedule deletion after retention period
     this._scheduleCleanup(requestId)
 
-    this._emit('cancelled', this._toDecision(updated))
-    return { ok: true, data: undefined }
+    const cancelledDecision = this._toDecision(updated)
+    this._emit('cancelled', cancelledDecision)
+    return { ok: true, data: cancelledDecision }
   }
 
   /** Count of decisions currently in 'pending' status. */
@@ -383,6 +393,17 @@ export class DecisionQueue {
       if (m.status === 'pending') count++
     }
     return count
+  }
+
+  /** Return all decisions currently in 'pending' status as read-only snapshots. */
+  getPending(): readonly Decision[] {
+    const result: Decision[] = []
+    for (const m of this.decisions.values()) {
+      if (m.status === 'pending') {
+        result.push(this._toDecision(m))
+      }
+    }
+    return result
   }
 
   // Private helpers

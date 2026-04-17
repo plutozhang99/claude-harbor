@@ -69,6 +69,33 @@ export interface BotHandle {
   getBot(): Bot
 }
 
+// ─── Internal constants ────────────────────────────────────────────────────────
+
+/**
+ * Telegram's maximum text length for sendMessage / reply is 4096 UTF-8 bytes.
+ * Replies exceeding this raise a 400 Bad Request which would otherwise be
+ * swallowed by the command handler's try/catch — leaving the user with no
+ * visible response.  The /sessions and /pending commands use {@link safeReply}
+ * to truncate before sending.
+ */
+const TELEGRAM_MAX_REPLY_BYTES = 4096
+
+/**
+ * Truncate `text` so its UTF-8 byte length fits within Telegram's 4096-byte
+ * sendMessage limit.  Uses a conservative character-slice (3900 chars) plus a
+ * truncation marker — well under the byte cap even when every character is a
+ * 4-byte emoji.  Multi-byte characters are never split mid-codepoint because
+ * `String.prototype.slice` operates on UTF-16 code units, but the 196-byte
+ * headroom (4096 − 3900) absorbs the worst case where each remaining slot
+ * holds a 4-byte glyph.
+ */
+function safeReply(text: string): string {
+  const bytes = new TextEncoder().encode(text).byteLength
+  if (bytes <= TELEGRAM_MAX_REPLY_BYTES) return text
+  const sliced = text.slice(0, 3900)
+  return `${sliced}\n…(truncated)`
+}
+
 // ─── Internal types ────────────────────────────────────────────────────────────
 
 /** Per-decision state stored while the decision is pending. */
@@ -373,6 +400,123 @@ export function startBot(config: ClaudegramBotConfig, deps: BotDeps): BotHandle 
     // Success — ACK with a brief toast. The message edit happens via the
     // 'answered' event handler.
     await ctx.answerCallbackQuery({ text: 'OK' })
+  })
+
+  // ── 3. Bot commands ────────────────────────────────────────────────────────
+  // All commands are automatically gated by the allowlist middleware registered
+  // first above. No additional auth check is needed here.
+  //
+  // Replies use plain text (no parse_mode) because sessionName and title are
+  // user-controlled and may contain MarkdownV2 special characters.
+
+  bot.command('sessions', async (ctx) => {
+    try {
+      const sessions = deps.registry.getActiveSessions()
+      if (sessions.length === 0) {
+        await ctx.reply('No active sessions.')
+        return
+      }
+      const lines = sessions.map((s) => `- ${s.sessionName} (${s.sessionId.slice(0, 8)})`)
+      const body = `Active sessions (${sessions.length}):\n${lines.join('\n')}`
+      await ctx.reply(safeReply(body))
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err)
+      process.stderr.write(`[bot] /sessions handler error: ${msg}\n`)
+    }
+  })
+
+  bot.command('pending', async (ctx) => {
+    try {
+      const pending = deps.queue.getPending()
+      if (pending.length === 0) {
+        await ctx.reply('No pending decisions.')
+        return
+      }
+      const lines = pending.map(
+        (d) => `- [${d.sessionName}] ${d.title} (id: ${d.requestId.slice(0, 8)})`,
+      )
+      const body = `Pending decisions (${pending.length}):\n${lines.join('\n')}`
+      await ctx.reply(safeReply(body))
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err)
+      process.stderr.write(`[bot] /pending handler error: ${msg}\n`)
+    }
+  })
+
+  /**
+   * /cancel <prefix>
+   *
+   * Note on idempotency + race: cancel() is idempotent in the queue.  If a
+   * decision raced into a terminal state (expired / answered) between the
+   * getPending() snapshot and the cancel() call, this reply still says
+   * "Cancelled: ..." but the original Telegram message will reflect the
+   * actual final state ("Expired" / "<answer>") via the onExpired / onAnswered
+   * handlers that run before the synchronous cancel() returns.
+   */
+  bot.command('cancel', async (ctx) => {
+    try {
+      const arg = ctx.match.trim()
+      if (!arg) {
+        await ctx.reply('Usage: /cancel <requestId or 8-char prefix>')
+        return
+      }
+      const pending = deps.queue.getPending()
+      const matched = pending.filter((d) => d.requestId.startsWith(arg))
+      if (matched.length === 0) {
+        await ctx.reply(`No pending decision matching '${arg}'.`)
+        return
+      }
+      if (matched.length > 1) {
+        process.stderr.write(
+          `[bot] /cancel ambiguous prefix '${arg}' matched ${matched.length} decisions\n`,
+        )
+        await ctx.reply(
+          `Ambiguous prefix '${arg}' matches ${matched.length} decisions. Use the full requestId.`,
+        )
+        return
+      }
+      // matched.length === 1 verified above; `!` asserts non-null without
+      // widening the element type (unlike `as Decision` which would also
+      // silently swallow an undefined slot).
+      const target = matched[0]!
+      const result = deps.queue.cancel(target.requestId)
+      if (!result.ok) {
+        await ctx.reply(`Failed to cancel: ${result.error.message}`)
+        return
+      }
+      await ctx.reply(`Cancelled: [${result.data.sessionName}] ${result.data.title}`)
+      // Note: 'cancelled' event fires synchronously inside cancel(), which triggers
+      // onCancelled → editTerminal to edit the original Telegram message. That
+      // async edit is fire-and-forget; this reply is the command's own confirmation.
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err)
+      process.stderr.write(`[bot] /cancel handler error: ${msg}\n`)
+    }
+  })
+
+  bot.command('cancel_all', async (ctx) => {
+    try {
+      const pending = deps.queue.getPending()
+      if (pending.length === 0) {
+        await ctx.reply('No pending decisions to cancel.')
+        return
+      }
+      let cancelled = 0
+      let failed = 0
+      for (const d of pending) {
+        const r = deps.queue.cancel(d.requestId)
+        if (r.ok) cancelled++
+        else failed++
+      }
+      const replyMsg =
+        failed > 0
+          ? `Cancelled ${cancelled} pending decisions (${failed} failed).`
+          : `Cancelled ${cancelled} pending decisions.`
+      await ctx.reply(replyMsg)
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err)
+      process.stderr.write(`[bot] /cancel_all handler error: ${msg}\n`)
+    }
   })
 
   // ── BotHandle ──────────────────────────────────────────────────────────────
