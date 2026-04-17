@@ -3,7 +3,7 @@
 ## Spec Files
 - docs/PRD.md
 
-## Current Phase: Phase 3C — bot commands
+## Current Phase: pause point — v0.1 Phase 1+2+3 全部完成；Phase 2D/4A/4C/4D 待启动
 
 ## Interruption Reason
 
@@ -23,9 +23,7 @@
 Teams: available (not used — parallel Agent calls preferred for independent workspaces)
 
 ## Active Task
-Phase 3C — Bot commands: /sessions (list active), /pending (list pending decisions), /cancel <id>, /cancel_all
-Sub-task progress: not started
-Relevant files: daemon/src/queue.ts (add getPending if missing), bot/src/queue-port.ts (extend port), bot/src/index.ts (bot.command handlers), daemon/src/index.ts (registryPort.getActiveSessions)
+none — pause point. 4 phase 待办（2D / 4A / 4C / 4D），全部对应 v0.1 production-ready milestone。
 
 ## Completed Tasks
 - [x] Phase 1A: Bun workspace scaffolding + shared TypeScript types — commit: 0066cde — code ✅ sec ✅ func ✅ type ✅ err ✅
@@ -37,9 +35,10 @@ Relevant files: daemon/src/queue.ts (add getPending if missing), bot/src/queue-p
 - [x] Phase 3A: grammy bot rendering + allowlist middleware + 3-button keyboard + 4096-byte guard — commit: 6d9627f — code ✅ sec ✅ func 🟡 type 🟡 err 🟡 (R2 partial — see risk note)
 - [x] Phase 2B: Channel server HTTP relay → daemon POST/long-poll + MCP verdict send-back + cross-component category/correlationId contract — commit: 7ec9803 — code ✅ sec ✅ func ✅ type 🟡 err ✅ (R2 type review recommended Decision union refactor — deferred to F3, current solution sound)
 - [x] Phase 3B: Bot subscribes to DecisionQueue events; callback_query → queue.answer; daemon wires bot at boot; reads decision.category; InlineKeyboard() truly clears buttons — commit: 190ba5e — code ✅ sec ✅ func ✅ type 🟡 err ✅
+- [x] Phase 2C: Session register handshake + registry events + bot session-lifecycle Telegram notifications + projectPath DoS guard + 3s deregister timeout + 2-level wrapper map — commit: aeadb75a — code ✅ sec ✅ func ✅ type ✅ err ✅
+- [x] Phase 3C: Bot commands /sessions /pending /cancel /cancel_all + 4096-byte safeReply truncation — commit: 1f4531d9 — code ✅ sec ✅ func ✅ type ✅ err ✅
 
 ## Pending Tasks (prioritized)
-- [ ] Phase 2C: Auto-register via CLAUDEGRAM_SESSION_NAME, auto-deregister on shutdown (also: replace ephemeral sessionId UUID in channel-server with real registered SessionId)
 - [ ] Phase 3C: Bot commands (/sessions, /pending, /cancel, /cancel_all)
 - [ ] Phase 2D: Unit tests for queue + registry (clears LOW risk before E2E)
 - [ ] Phase 4A: E2E test with real Claude Code sessions
@@ -61,6 +60,8 @@ Relevant files: daemon/src/queue.ts (add getPending if missing), bot/src/queue-p
 | Phase 3A | NITS→PASS | FINDINGS→PASS | R1 PASS, R2 partial | R1 NEEDS-TIGHTEN→fixed, R2 partial | R1 FINDINGS→fixed, R2 partial | 2 | ✅ COMPLETE (partial R2) |
 | Phase 2B | PASS | LOW→PASS | ALL MET | R2 NEEDS-TIGHTEN (Decision union refactor deferred F3) | LOW→PASS | 2+L1L2 | ✅ COMPLETE |
 | Phase 3B | PASS | PASS | ALL MET | R2 NEEDS-TIGHTEN (linked Decision union — deferred F3) | LOW→PASS | 2+L1 | ✅ COMPLETE |
+| Phase 2C | NITS→PASS | FINDINGS→PASS | ALL MET | NEEDS-TIGHTEN→STRONG | FINDINGS→PASS | 2 | ✅ COMPLETE |
+| Phase 3C | NITS→PASS | LOW→PASS | ALL MET | STRONG | LOW→PASS | 2 | ✅ COMPLETE |
 
 ## Key Decisions & Accepted Risks
 - 2026-04-16 Decision: Two-component split (Daemon + Channel Server). Daemon is singleton holding grammy bot; Channel Server is per-session MCP stdio. Rationale: Telegram Bot API only allows one getUpdates consumer per token.
