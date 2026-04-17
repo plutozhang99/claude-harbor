@@ -51,14 +51,69 @@ app.notFound((c) => {
 })
 
 // ── Bot setup ──────────────────────────────────────────────────────────────────
-// SessionRegistry doesn't expose getActiveSessions() yet; provide a minimal
-// adapter that satisfies SessionRegistryPort until Phase 3C adds it.
+// Inline adapter that satisfies SessionRegistryPort structurally:
+//   - getActiveSessions() maps Session.name → sessionName
+//   - on/off delegate to the typed registry emitter so bot listeners receive
+//     the correct SessionInfo shape (sessionId + sessionName only)
+//
+// The listener wrapper translates Session → SessionInfo at the boundary so
+// the bot never depends on the full Session type from daemon/.
+// We do NOT import SessionEventName/SessionEventListener from @claudegram/bot —
+// that would flip the dependency direction (daemon → bot is already established;
+// bot → daemon must never happen).  TypeScript's structural typing means the
+// inline types below are assignment-compatible with the bot's port interface
+// without an explicit import.
+import type { Session } from '@claudegram/shared'
+
+// Inline mirror of SessionRegistryPort's listener types (structural compatibility
+// with bot/src/queue-port.ts SessionEventName / SessionEventListener).
+type RegistryEventName = 'registered' | 'deregistered'
+type RegistryEventListener = (session: { readonly sessionId: string; readonly sessionName: string }) => void
+
+// Cache: maps user listener → per-event wrapped (Session→SessionInfo) listener.
+//
+// Key contract: caller must pass the SAME function reference to off() that was
+// passed to on(). (Bot uses const onSessionRegistered/onSessionDeregistered for
+// stable identity — see bot/src/index.ts.)
+//
+// Two-level structure (listener → event → wrapper) so the same function can be
+// registered to BOTH 'registered' and 'deregistered' without the second on()
+// overwriting the first wrapper. Bot today uses two distinct functions, but
+// this adapter must not bake in that assumption.
+const listenerWrappers = new Map<
+  RegistryEventListener,
+  Map<RegistryEventName, (session: Session) => void>
+>()
+
 const registryPort = {
   getActiveSessions(): readonly { readonly sessionId: string; readonly sessionName: string }[] {
     return registry.getAll().map((s) => ({
       sessionId: s.sessionId,
       sessionName: s.name,
     }))
+  },
+  on(event: RegistryEventName, listener: RegistryEventListener): void {
+    const wrapper = (session: Session): void => {
+      listener({ sessionId: session.sessionId, sessionName: session.name })
+    }
+    let perEvent = listenerWrappers.get(listener)
+    if (perEvent === undefined) {
+      perEvent = new Map()
+      listenerWrappers.set(listener, perEvent)
+    }
+    perEvent.set(event, wrapper)
+    registry.on(event, wrapper)
+  },
+  off(event: RegistryEventName, listener: RegistryEventListener): void {
+    const perEvent = listenerWrappers.get(listener)
+    if (perEvent === undefined) return
+    const wrapper = perEvent.get(event)
+    if (wrapper === undefined) return
+    registry.off(event, wrapper)
+    perEvent.delete(event)
+    if (perEvent.size === 0) {
+      listenerWrappers.delete(listener)
+    }
   },
 }
 
@@ -69,8 +124,8 @@ const botHandle = startBot(
   },
   {
     // DecisionQueue satisfies DecisionQueuePort structurally:
-    //   - on(event, listener): this  ← unknown (port says `unknown`)
-    //   - off(event, listener): this ← unknown
+    //   - on(event, listener): this  ← void (port says `void`; `this` is assignable to `void`)
+    //   - off(event, listener): this ← void
     //   - answer(requestId, optionId): Result<Decision, ErrorResponse>
     // TypeScript verifies this at the call site without any import of
     // DecisionQueuePort in daemon — the port lives in bot/ only.

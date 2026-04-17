@@ -16,6 +16,7 @@ import type {
   Decision,
   CreateDecisionRequest,
   RequestId,
+  SessionId,
   Result,
 } from '@claudegram/shared'
 
@@ -54,6 +55,24 @@ export interface DaemonClient {
     timeoutMs: number,
     signal?: AbortSignal,
   ): Promise<Result<Decision, RelayError>>
+
+  /**
+   * POST /api/sessions — register this channel-server instance with the daemon.
+   * Returns the assigned sessionId on success (201).
+   *
+   * @param sessionName  Human-readable session name (e.g. "api-refactor").
+   * @param projectPath  Absolute, normalised working directory of the session.
+   */
+  registerSession(
+    sessionName: string,
+    projectPath: string,
+  ): Promise<Result<{ readonly sessionId: SessionId }, RelayError>>
+
+  /**
+   * DELETE /api/sessions/:sessionId — deregister this session from the daemon.
+   * A 404 response is treated as success (session already gone / daemon restarted).
+   */
+  deregisterSession(sessionId: SessionId): Promise<Result<void, RelayError>>
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -176,6 +195,88 @@ export function createDaemonClient(baseUrl: string): DaemonClient {
 
       const requestId = (json as Record<string, unknown>).requestId as RequestId
       return { ok: true, data: { requestId } }
+    },
+
+    // ── registerSession ───────────────────────────────────────────────────────
+    async registerSession(
+      sessionName: string,
+      projectPath: string,
+    ): Promise<Result<{ readonly sessionId: SessionId }, RelayError>> {
+      let response: Response
+      try {
+        response = await fetch(`${baseUrl}/api/sessions`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: sessionName, projectPath }),
+        })
+      } catch (err: unknown) {
+        return { ok: false, error: classifyFetchError(err) }
+      }
+
+      if (response.status !== 201) {
+        const body = await safeBodyText(response)
+        return {
+          ok: false,
+          error: { kind: 'http', status: response.status, body },
+        }
+      }
+
+      let json: unknown
+      try {
+        json = await response.json()
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err)
+        return { ok: false, error: { kind: 'parse', message } }
+      }
+
+      // Narrow to the shape we expect: { sessionId: string, name: string }
+      if (
+        typeof json !== 'object' ||
+        json === null ||
+        !('sessionId' in json) ||
+        typeof (json as Record<string, unknown>).sessionId !== 'string'
+      ) {
+        return {
+          ok: false,
+          error: {
+            kind: 'parse',
+            message: `registerSession: unexpected response shape: ${JSON.stringify(json)}`,
+          },
+        }
+      }
+
+      const sessionId = (json as Record<string, unknown>).sessionId as SessionId
+      return { ok: true, data: { sessionId } }
+    },
+
+    // ── deregisterSession ─────────────────────────────────────────────────────
+    async deregisterSession(sessionId: SessionId): Promise<Result<void, RelayError>> {
+      // 3 s timeout: this is called from the channel-server shutdown path
+      // (await deregisterSession before process.exit). If the daemon is
+      // hung or slow, an unbounded fetch would deadlock the shutdown and
+      // the OS would have to SIGKILL the process. AbortSignal.timeout
+      // surfaces the abort as an AbortError, which classifyFetchError maps
+      // to RelayError { kind: 'timeout' } so the caller can log + exit.
+      let response: Response
+      try {
+        response = await fetch(`${baseUrl}/api/sessions/${sessionId}`, {
+          method: 'DELETE',
+          signal: AbortSignal.timeout(3000),
+        })
+      } catch (err: unknown) {
+        return { ok: false, error: classifyFetchError(err) }
+      }
+
+      // 204 = success; 404 = already gone — both are acceptable outcomes
+      if (response.status === 204 || response.status === 404) {
+        return { ok: true, data: undefined }
+      }
+
+      const body = await safeBodyText(response)
+      return {
+        ok: false,
+        error: { kind: 'http', status: response.status, body },
+      }
     },
 
     // ── pollDecision ──────────────────────────────────────────────────────────

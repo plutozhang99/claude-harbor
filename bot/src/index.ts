@@ -1,7 +1,13 @@
 import { Bot, InlineKeyboard } from 'grammy'
 import { parseCallbackData } from '@claudegram/shared'
 import type { Decision, RequestId } from '@claudegram/shared'
-import type { DecisionQueuePort, SessionRegistryPort, DecisionEventListener } from './queue-port'
+import type {
+  DecisionQueuePort,
+  SessionRegistryPort,
+  DecisionEventListener,
+  SessionEventListener,
+  SessionInfo,
+} from './queue-port'
 import { renderPermissionMessage } from './render'
 import { formatAnsweredText } from './format-answered'
 
@@ -251,6 +257,35 @@ export function startBot(config: ClaudegramBotConfig, deps: BotDeps): BotHandle 
     editTerminal(decision, 'Cancelled')
   }
 
+  // ── Registry event handlers ─────────────────────────────────────────────────
+  // Named variables for reference-equality unsubscription in BotHandle.stop.
+
+  const onSessionRegistered: SessionEventListener = (session: SessionInfo): void => {
+    void (async () => {
+      try {
+        await bot.api.sendMessage(targetChatId, `Session registered: ${session.sessionName}`)
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err)
+        process.stderr.write(
+          `[bot] failed to send session-registered notification for '${session.sessionName}': ${msg}\n`,
+        )
+      }
+    })()
+  }
+
+  const onSessionDeregistered: SessionEventListener = (session: SessionInfo): void => {
+    void (async () => {
+      try {
+        await bot.api.sendMessage(targetChatId, `Session ended: ${session.sessionName}`)
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err)
+        process.stderr.write(
+          `[bot] failed to send session-ended notification for '${session.sessionName}': ${msg}\n`,
+        )
+      }
+    })()
+  }
+
   // Subscribe to queue events immediately (before bot.start()).
   // The handlers use `bot.api` which is safe to call before `start()` since
   // grammy initialises the API client in the Bot constructor.
@@ -258,6 +293,10 @@ export function startBot(config: ClaudegramBotConfig, deps: BotDeps): BotHandle 
   deps.queue.on('answered', onAnswered)
   deps.queue.on('expired', onExpired)
   deps.queue.on('cancelled', onCancelled)
+
+  // Subscribe to registry lifecycle events.
+  deps.registry.on('registered', onSessionRegistered)
+  deps.registry.on('deregistered', onSessionDeregistered)
 
   // ── 1. Allowlist middleware ────────────────────────────────────────────────
   // Must be registered FIRST. Silent discard for unauthorized users — no reply,
@@ -349,6 +388,10 @@ export function startBot(config: ClaudegramBotConfig, deps: BotDeps): BotHandle 
       deps.queue.off('answered', onAnswered)
       deps.queue.off('expired', onExpired)
       deps.queue.off('cancelled', onCancelled)
+
+      // Unsubscribe from registry lifecycle events for the same reason.
+      deps.registry.off('registered', onSessionRegistered)
+      deps.registry.off('deregistered', onSessionDeregistered)
 
       if (bot.isRunning()) {
         await bot.stop()

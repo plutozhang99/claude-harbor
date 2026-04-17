@@ -3,7 +3,7 @@
 ## Spec Files
 - docs/PRD.md
 
-## Current Phase: Phase 2B + 3B (parallel)
+## Current Phase: Phase 2C (sequential; 3C follows)
 
 ## Interruption Reason
 
@@ -23,10 +23,9 @@
 Teams: available (not used — parallel Agent calls preferred for independent workspaces)
 
 ## Active Task
-Phase 2B — Channel server HTTP relay (POST decision → long-poll → verdict, daemon retry/timeout, MCP send-back) [parallel with 3B]
-Phase 3B — Bot subscribes to DecisionQueue events; callback_query → queue.answer; daemon wires startBot at boot [parallel with 2B]
-Sub-task progress: not yet started; about to launch parallel agents
-Relevant files: channel-server/src/permission.ts (relay impl), channel-server/src/index.ts (verdict send-back), bot/src/index.ts (queue subscription), daemon/src/index.ts (bot integration)
+Phase 2C — Session register handshake (channel-server POST /api/sessions on boot, DELETE on shutdown) + replace ephemeral sessionId + registry EventEmitter + bot subscribes for "Session registered/ended" Telegram notifications
+Sub-task progress: not started; 2C and 3C run sequentially (both touch bot/index.ts + daemon/registry)
+Relevant files: channel-server/src/index.ts, channel-server/src/relay.ts, daemon/src/registry.ts, daemon/src/routes/sessions.ts, bot/src/queue-port.ts, bot/src/index.ts
 
 ## Completed Tasks
 - [x] Phase 1A: Bun workspace scaffolding + shared TypeScript types — commit: 0066cde — code ✅ sec ✅ func ✅ type ✅ err ✅
@@ -34,13 +33,13 @@ Relevant files: channel-server/src/permission.ts (relay impl), channel-server/sr
 - [x] Phase 1C: Decision queue with TTL + long-polling endpoint — commit: 3433d51 — code ✅ sec ✅ func ✅ type ✅ err ✅
 - [x] Phase 1D: Cross-component contracts + typed events + AbortSignal cleanup — commit: ecfb9d8 — code ✅ sec ✅ func ✅ type ✅ err ✅
 - [x] Phase 1E: bot/ workspace + zod-validated env config + URL/integer security guards — commit: 159e8df — code ✅ sec ✅ func ✅ type ✅ err ✅
-- [x] Phase 2A: Channel Server MCP stdio + claude/channel/permission + session-scoped yes_all allowlist — commit: 61c7f20 — code ✅ sec ✅ func 🟡 type 🟡 err 🟡 (see Round 2 partial review note)
-- [x] Phase 3A: grammy bot rendering + allowlist middleware + 3-button keyboard + 4096-byte guard — commit: 6d9627f — code ✅ sec ✅ func 🟡 type 🟡 err 🟡 (see Round 2 partial review note)
+- [x] Phase 2A: Channel Server MCP stdio + claude/channel/permission + session-scoped yes_all allowlist — commit: 61c7f20 — code ✅ sec ✅ func 🟡 type 🟡 err 🟡 (R2 partial — see risk note)
+- [x] Phase 3A: grammy bot rendering + allowlist middleware + 3-button keyboard + 4096-byte guard — commit: 6d9627f — code ✅ sec ✅ func 🟡 type 🟡 err 🟡 (R2 partial — see risk note)
+- [x] Phase 2B: Channel server HTTP relay → daemon POST/long-poll + MCP verdict send-back + cross-component category/correlationId contract — commit: 7ec9803 — code ✅ sec ✅ func ✅ type 🟡 err ✅ (R2 type review recommended Decision union refactor — deferred to F3, current solution sound)
+- [x] Phase 3B: Bot subscribes to DecisionQueue events; callback_query → queue.answer; daemon wires bot at boot; reads decision.category; InlineKeyboard() truly clears buttons — commit: 190ba5e — code ✅ sec ✅ func ✅ type 🟡 err ✅
 
 ## Pending Tasks (prioritized)
-- [ ] Phase 2B: Channel server HTTP relay → daemon POST/long-poll → verdict + MCP send-back [IN PROGRESS — parallel with 3B]
-- [ ] Phase 3B: Bot subscribes to DecisionQueue events; callback_query → queue.answer; daemon wires bot at boot [IN PROGRESS — parallel with 2B]
-- [ ] Phase 2C: Auto-register via CLAUDEGRAM_SESSION_NAME, auto-deregister on shutdown
+- [ ] Phase 2C: Auto-register via CLAUDEGRAM_SESSION_NAME, auto-deregister on shutdown (also: replace ephemeral sessionId UUID in channel-server with real registered SessionId)
 - [ ] Phase 3C: Bot commands (/sessions, /pending, /cancel, /cancel_all)
 - [ ] Phase 2D: Unit tests for queue + registry (clears LOW risk before E2E)
 - [ ] Phase 4A: E2E test with real Claude Code sessions
@@ -60,6 +59,8 @@ Relevant files: channel-server/src/permission.ts (relay impl), channel-server/sr
 | Phase 1E | NITS→PASS | FINDINGS→PASS | PARTIAL→PASS | TIGHTEN→STRONG | FINDINGS→PASS | 2+fixup | ✅ COMPLETE |
 | Phase 2A | NITS→PASS | FINDINGS→PASS | R1 PASS, R2 partial (rate-limited) | R1 NEEDS-TIGHTEN→fixed, R2 partial | R1 FINDINGS→fixed, R2 partial | 2 | ✅ COMPLETE (partial R2) |
 | Phase 3A | NITS→PASS | FINDINGS→PASS | R1 PASS, R2 partial | R1 NEEDS-TIGHTEN→fixed, R2 partial | R1 FINDINGS→fixed, R2 partial | 2 | ✅ COMPLETE (partial R2) |
+| Phase 2B | PASS | LOW→PASS | ALL MET | R2 NEEDS-TIGHTEN (Decision union refactor deferred F3) | LOW→PASS | 2+L1L2 | ✅ COMPLETE |
+| Phase 3B | PASS | PASS | ALL MET | R2 NEEDS-TIGHTEN (linked Decision union — deferred F3) | LOW→PASS | 2+L1 | ✅ COMPLETE |
 
 ## Key Decisions & Accepted Risks
 - 2026-04-16 Decision: Two-component split (Daemon + Channel Server). Daemon is singleton holding grammy bot; Channel Server is per-session MCP stdio. Rationale: Telegram Bot API only allows one getUpdates consumer per token.
@@ -99,7 +100,17 @@ Relevant files: channel-server/src/permission.ts (relay impl), channel-server/sr
 - 2026-04-16 Decision (Phase 2A Round 1): zod schema string field-length budgets — title 256, description 4096, toolName/sessionId 128 — DoS guard. Schema is .strict() (rejects unknown fields).
 - 2026-04-16 Decision (Phase 3A): bot allowlist middleware acks unauthorized callback_query with empty answerCallbackQuery() to remove Telegram loading spinner without leaking allowlist signal.
 - 2026-04-16 Decision (Phase 3A): TELEGRAM_MAX_MESSAGE_BYTES=4096 UTF-8 byte check in renderPermissionMessage; returns Result with 'message_too_long' before encode loop.
-- 2026-04-16 Risk accepted (Phase 2A+3A Round 2): 3 of 5 review slots (Functional, Type, Error) hit Anthropic 5h rate limit during Round 2. Reasoning for accepting partial review: (a) Slot 1 TS+Slot 2 Security passed Round 2 fully; (b) Round 1 reviewers covered all changed surfaces and recommended the exact fixes that Round 1 implementer agents executed; (c) implementer self-tests verified all 9 fix contracts (max-length reject, .strict() reject, message_too_long, allowlist callback ack, etc.); (d) `bunx tsc -b` passes cross-workspace. If issues surface in Phase 2B integration, attribute first to these unverified Round 2 surfaces and re-review.
+- 2026-04-16 Risk accepted (Phase 2A+3A Round 2): 3 of 5 review slots (Functional, Type, Error) hit Anthropic 5h rate limit during Round 2. Reasoning for accepting partial review: (a) Slot 1 TS+Slot 2 Security passed Round 2 fully; (b) Round 1 reviewers covered all changed surfaces and recommended the exact fixes that Round 1 implementer agents executed; (c) implementer self-tests verified all 9 fix contracts; (d) `bunx tsc -b` passes cross-workspace. If issues surface, attribute first to these unverified Round 2 surfaces and re-review.
+- 2026-04-16 Decision (Phase 2B): channel-server uses ephemeral `crypto.randomUUID() as SessionId` at boot. Daemon registry.touch(sessionId) silently no-ops on unknown IDs, so decisions still create. Phase 2C will replace with real registration handshake (POST /api/sessions on startup, DELETE on shutdown).
+- 2026-04-16 Decision (Phase 2B): Channel server polls daemon with 35s budget (5s above daemon's 30s long-poll hold). On POST or poll failure, channel server returns deny with structured reason (daemon_unreachable_<kind> / poll_failed_<kind>) so admin can diagnose.
+- 2026-04-16 Decision (Phase 2B): MCP verdict send-back via `server.notification('claude/channel/permission/result', {correlationId, verdict})`. JSON-RPC 2.0 forbids replying to a notification, so a separate notification frame is used. Claude Code must include correlationId on outgoing notifications and listen for the result method to match. correlationId is opaque, length-bounded to 128.
+- 2026-04-16 Decision (Phase 2B): relay.ts safeBodyText capped at 8KB to prevent unbounded error-body buffering from misconfigured/hostile daemon URL.
+- 2026-04-16 Decision (Phase 2B): cross-component contract — `category: PermissionCategory` field threaded through CreateDecisionRequest → daemon Decision → bot's onCreated handler. PERMISSION_CATEGORIES + PermissionCategory live in shared/types.ts (not protocol.ts) to avoid circular dep with Decision.
+- 2026-04-16 Decision (Phase 3B): bot uses `config.allowlist[0]` as canonical chat_id (PRD F4 single-user model). Multi-user broadcast deferred — would require keying messageMap on (requestId, chatId).
+- 2026-04-16 Decision (Phase 3B): editTerminal uses `reply_markup: new InlineKeyboard()` (empty keyboard) — `undefined` would be omitted by JSON.stringify and Telegram treats omitted as "no change", leaving stale buttons.
+- 2026-04-16 Decision (Phase 3B): messageMap.delete in finally — terminal-state messages don't need re-edit attempts; even if first edit fails, forget the entry to prevent map leak across answered/expired/cancelled retries.
+- 2026-04-16 Decision (Phase 3B): bot/queue-port.ts holds DecisionQueuePort + SessionRegistryPort structural interfaces — bot doesn't import daemon's DecisionQueue class directly, keeps daemon→bot dep direction clean.
+- 2026-04-16 Risk noted (Phase 2B+3B Round 2 type review): `category` is optional on DecisionBase + CreateDecisionRequest, requires runtime guard in bot. Architectural cleanup would split DecisionBase into PermissionDecisionBase (category required) + CustomDecisionBase, lifting union to discriminate on type+status. Deferred to Phase F3 when custom decisions are wired. Current runtime guard (skip + stderr) is correct but type-loose.
 
 ## Next Agent Prompt
 Two parallel agents launching for Phase 2B + 3B. See per-agent prompts in agent launch.

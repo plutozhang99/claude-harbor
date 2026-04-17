@@ -11,10 +11,22 @@ import type { SessionId } from '@claudegram/shared'
 
 const registerSchema = z.object({
   name: z.string().min(1).max(64),
-  projectPath: z.string().min(1).refine(
-    (p) => !p.includes('\x00') && p === normalize(p) && p.startsWith('/'),
-    { message: 'projectPath must be an absolute, normalised path with no null bytes.' }
-  ),
+  // Combined refine: bound length (POSIX PATH_MAX = 4096), reject all C0/DEL
+  // control characters (\x00–\x1f, \x7f), require absolute normalised path.
+  // Without .max(), a 100MB path would pass validation, be stored in the
+  // registry, and be re-serialised on every GET /api/sessions.
+  projectPath: z
+    .string()
+    .min(1)
+    .max(4096)
+    .refine(
+      (p) =>
+        !/[\x00-\x1f\x7f]/.test(p) && p === normalize(p) && p.startsWith('/'),
+      {
+        message:
+          'projectPath must be an absolute, normalised path with no control characters and ≤4096 bytes.',
+      },
+    ),
 })
 
 const uuidSchema = z.string().uuid()

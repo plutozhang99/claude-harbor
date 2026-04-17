@@ -5,31 +5,13 @@ import type { PermissionVerdict, SessionId } from '@claudegram/shared'
 import { loadChannelConfig } from './config.js'
 import { SessionPermissionAllowlist } from './allowlist.js'
 import { handlePermission, parsePermissionNotification } from './permission.js'
-import { createDaemonClient } from './relay.js'
+import { createDaemonClient, formatRelayError } from './relay.js'
 
 // ─── Bootstrap ───────────────────────────────────────────────────────────────
 
 // Fail fast on bad environment; loadChannelConfig calls process.exit(1) if
 // CLAUDEGRAM_SESSION_NAME is missing or CLAUDEGRAM_DAEMON_URL is invalid.
 const config = loadChannelConfig()
-
-// ─── Phase 2B: ephemeral session identity ────────────────────────────────────
-//
-// A stable UUID is generated once per process lifetime and used as the
-// sessionId in every CreateDecisionRequest sent to the daemon.
-//
-// Limitation (to be resolved in Phase 2C):
-//   This UUID is NOT registered with the daemon via POST /api/sessions, so the
-//   daemon's session registry has no record of it.  The daemon route currently
-//   calls `registry.touch(req.sessionId)` which silently no-ops on unknown IDs,
-//   so decision creation still succeeds.  Phase 2C will replace this UUID with
-//   the real SessionId returned by a proper session registration handshake at
-//   startup.
-const sessionId = crypto.randomUUID() as SessionId
-
-process.stderr.write(
-  `[claudegram/channel-server] starting — session="${config.CLAUDEGRAM_SESSION_NAME}" daemon="${config.CLAUDEGRAM_DAEMON_URL}" sessionId="${sessionId}"\n`,
-)
 
 // ─── Session-scoped state ─────────────────────────────────────────────────────
 
@@ -38,6 +20,83 @@ const allowlist = new SessionPermissionAllowlist()
 // ─── Daemon HTTP client ───────────────────────────────────────────────────────
 
 const daemon = createDaemonClient(config.CLAUDEGRAM_DAEMON_URL)
+
+// ─── Phase 2C: register session with daemon ───────────────────────────────────
+//
+// Boot order: loadChannelConfig → create daemon client → registerSession →
+//   install signal/stdin handlers → connect MCP transport.
+//
+// projectPath defaults to process.cwd(), which reflects the working directory
+// of the Claude Code session that spawned this channel-server.  This is the
+// best approximation of the project path without an explicit env var.
+
+const projectPath = process.cwd()
+process.stderr.write(
+  `[claudegram/channel-server] registering session "${config.CLAUDEGRAM_SESSION_NAME}" with daemon at ${config.CLAUDEGRAM_DAEMON_URL}\n`,
+)
+
+const registered = await daemon.registerSession(config.CLAUDEGRAM_SESSION_NAME, projectPath)
+if (!registered.ok) {
+  process.stderr.write(
+    `[claudegram/channel-server] failed to register session '${config.CLAUDEGRAM_SESSION_NAME}': ${formatRelayError(registered.error)}\n`,
+  )
+  // Only suggest "is the daemon running?" for transport-level failures.
+  // 4xx/5xx HTTP responses prove the daemon IS running, so that hint would
+  // be misleading (e.g. a 409 SESSION_NAME_CONFLICT or a 500 internal error).
+  if (registered.error.kind === 'network' || registered.error.kind === 'timeout') {
+    process.stderr.write(
+      `[claudegram/channel-server] is the daemon running at ${config.CLAUDEGRAM_DAEMON_URL}?\n`,
+    )
+  }
+  process.exit(1)
+}
+const sessionId: SessionId = registered.data.sessionId
+
+process.stderr.write(
+  `[claudegram/channel-server] registered as '${config.CLAUDEGRAM_SESSION_NAME}' (${sessionId})\n`,
+)
+
+// ─── Graceful shutdown ────────────────────────────────────────────────────────
+//
+// Deregisters the session before exiting.  The `shuttingDown` guard prevents
+// double-shutdown if multiple signals arrive in quick succession (e.g. SIGINT
+// followed by SIGTERM).  The flag is set synchronously BEFORE the first
+// `await` so a re-entry from a second signal is rejected before any I/O —
+// this is correct because Node.js executes the synchronous prologue of an
+// async function on the call stack of the caller.
+//
+// Known TODO (Phase 4C/2D): the MCP SDK does not expose an `onclose` hook for
+// the stdio transport, so `stdin.on('end')` may not fire when Claude Code
+// closes the transport via JSON-RPC rather than closing the pipe. Until then
+// the SIGTERM/SIGINT path is the primary shutdown trigger.
+
+let shuttingDown = false
+
+async function shutdown(reason: string): Promise<void> {
+  if (shuttingDown) return
+  shuttingDown = true
+  process.stderr.write(`[claudegram/channel-server] shutting down (${reason})\n`)
+  const deregistered = await daemon.deregisterSession(sessionId)
+  if (!deregistered.ok) {
+    process.stderr.write(
+      `[claudegram/channel-server] deregister failed: ${formatRelayError(deregistered.error)}\n`,
+    )
+  }
+  process.exit(0)
+}
+
+process.on('SIGINT', () => {
+  void shutdown('SIGINT')
+})
+process.on('SIGTERM', () => {
+  void shutdown('SIGTERM')
+})
+process.stdin.on('end', () => {
+  void shutdown('stdin closed')
+})
+process.stdin.on('error', (err: Error) => {
+  void shutdown(`stdin error: ${err.message}`)
+})
 
 // ─── MCP Server setup ─────────────────────────────────────────────────────────
 
