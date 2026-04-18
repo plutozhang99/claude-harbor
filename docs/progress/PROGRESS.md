@@ -3,7 +3,7 @@
 ## Spec Files
 - docs/request_v1.md
 
-## Current Phase: Phase 2 — Storage (2.1 schema+migrate, 2.2 repo types in parallel; 2.3 after both)
+## Current Phase: Phase 3 — HTTP (3.1 server entry next; 3.2 health + 3.3 ingest follow)
 
 ## Interruption Reason
 
@@ -27,13 +27,16 @@ Not activated for P0:
 - Slot 9 Clinical: N/A
 
 ## Active Task
-Phase 2 next: launching 2.1 (schema+migrate) and 2.2 (repo types) in parallel.
+Phase 3.1 queued — Bun.serve entry + route dispatcher + synchronous migrate before listen.
 
 ## Completed Tasks
-- [x] **1.1** scaffold — commit: 2b3b04e — config-only, no reviews needed
-- [x] **1.2** `src/config.ts` Zod config — commit: 2b3b04e — code ✅ sec ✅ func ✅ type ✅ err ✅ — 1 round of fixes (path traversal refine, strict PORT regex, readonly)
-- [x] **1.3** `src/logger.ts` JSONL stderr — commit: 2b3b04e — code ✅ sec ✅ func ✅ type ✅ err ✅ — 1 round of fixes (safe fallback for JSON.stringify throw on circular/BigInt)
-- [x] **1.4** `src/db/client.ts` — code ✅ sec ✅ func ✅ db ✅ err ✅ — added foreign_keys PRAGMA post-write verification per silent-failure review
+- [x] **1.1** scaffold — commit: 2b3b04e
+- [x] **1.2** `src/config.ts` — commit: 2b3b04e — all reviews pass, path traversal refine + strict PORT regex
+- [x] **1.3** `src/logger.ts` — commit: 2b3b04e — safe JSON fallback for circular/BigInt
+- [x] **1.4** `src/db/client.ts` — commit: 664f059 — foreign_keys PRAGMA post-write verification
+- [x] **2.1** `src/db/schema.ts` + `migrate.ts` — code ✅ sec ✅ func ✅ db ✅ err ✅ — ms-precision via `CAST(unixepoch('subsec')*1000 AS INTEGER)`, TODO(P1) comment for schema versioning
+- [x] **2.2** `src/repo/types.ts` — code ✅ func ✅ — extracted `MessageInsert` + `SessionUpsert` named types
+- [x] **2.3** `src/repo/sqlite.ts` — code ✅ sec ✅ func ✅ db ✅ err ✅ — 16 tests + limit floor clamp (prevent `LIMIT -1 = unlimited` footgun)
 
 ## Pending Tasks (prioritized)
 
@@ -69,6 +72,9 @@ Phase 2 next: launching 2.1 (schema+migrate) and 2.2 (repo types) in parallel.
 | 1.2 | PASS | PASS (path traversal refined) | 16/16 | N/A | PASS (strict PORT, readonly) | PASS | 1 | ✅ |
 | 1.3 | PASS | PASS | 18/19 (console.* spy skipped, verified by grep) | N/A | PASS (LEVEL_RANK readonly) | PASS→PASS (safe JSON fallback) | 1 | ✅ |
 | 1.4 | PASS | PASS | 100% | PASS for P0 scope | PASS | PASS (FK verify added) | 1 | ✅ |
+| 2.1 | PASS | N/A | 18/18 | PASS for P0 | PASS | PASS (schema-drift TODO) | 1 | ✅ |
+| 2.2 | PASS | N/A | 7/7 | N/A | PASS (named types) | N/A | 1 | ✅ |
+| 2.3 | PASS | PASS | 27/27 | PASS | PASS | PASS (limit floor) | 1 | ✅ |
 
 ## Key Decisions & Accepted Risks
 
@@ -118,9 +124,22 @@ Phase 2 next: launching 2.1 (schema+migrate) and 2.2 (repo types) in parallel.
 - Q4 `/ingest` response shape → approved. Confirmed via MCP spec (Context7) that no Claude Code convention applies.
 - Q5 Webhook observability → fire-and-forget with structured stderr log only. No retry queue until P2.
 
+### Phase 2 addenda (2026-04-18)
+- Schema `ingested_at` uses `CAST(unixepoch('subsec')*1000 AS INTEGER)` for true millisecond precision (not `unixepoch()*1000` which is second-aligned). Verified in migrate.test.ts case 6.
+- `MessageRepo.findBySession` applies `Math.max(1, limit)` floor before `Math.min(limit, 500)` ceiling to prevent SQLite's `LIMIT -1 = unlimited` footgun. Three regression tests (limit=0, -1, -9999) all assert clamp to 1.
+- `schema_version` table deferred to P1; `migrate.ts` carries TODO(P1) comment noting `IF NOT EXISTS` silent column-drift.
+
 ## Next Agent Prompt
 
-Task: Phase 2.1 (schema+migrate) and 2.2 (repo types) — launch in parallel.
+Task: Phase 3.1 — `src/http.ts` + `src/server.ts` — Bun.serve entry, route dispatcher.
+
+Project root: `/Users/plutozhang/Documents/claudegram`. Work in `current/claudegram/src/`.
+
+Contract:
+- `src/http.ts`: pure router — `dispatch(req: Request, ctx: Ctx): Response | Promise<Response>` where `ctx = { msgRepo, sessRepo, logger }`.
+- `src/server.ts`: `createServer({ config, ctx }): { server, stop() }` — migrate() synchronous BEFORE Bun.serve(). Reserve `/api/*` + `/web/*` → return 404 with `{ok:false,error:'not found'}` (JSON). Unknown routes → 404.
+- TDD from 3.1 onward. Test via exported `createServer` factory (required for 5.2 in-process integration test).
+- No route handlers yet beyond the 404 — 3.2 adds `/health`, 3.3 adds `/ingest`, 3.4 adds graceful shutdown.
 
 Project root: `/Users/plutozhang/Documents/claudegram`. Work in `current/claudegram/src/`. Stack: Bun 1.3.12 + TS strict + bun:sqlite + Zod. Test: `bun test` from `current/claudegram/`.
 
