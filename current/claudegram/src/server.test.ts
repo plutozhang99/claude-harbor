@@ -3,6 +3,7 @@ import { openDatabase, closeDatabase } from './db/client.js';
 import type { Database } from './db/client.js';
 import { createServer } from './server.js';
 import type { RunningServer } from './server.js';
+import { InMemoryHub } from './ws/hub.js';
 import type { Config } from './config.js';
 import { createLogger } from './logger.js';
 
@@ -11,7 +12,7 @@ const BASE_PORT = 38000 + (process.pid % 1000);
 
 function makeConfig(port: number): Config {
   // Bypass Zod to allow port=0-style ephemeral. Tests use explicit high ports.
-  return { port, db_path: ':memory:', log_level: 'error' };
+  return { port, db_path: ':memory:', log_level: 'error', trustCfAccess: false };
 }
 
 const logger = createLogger({ level: 'error' });
@@ -95,3 +96,40 @@ describe('createServer', () => {
     expect(row?.cnt).toBe(2);
   });
 });
+
+describe('WebSocket /user-socket', () => {
+  it('connecting to /user-socket increases hub size to 1', async () => {
+    const hub = new InMemoryHub();
+    server = createServer({ config: makeConfig(nextPort()), db, logger, hub });
+
+    const ws = new WebSocket(`ws://localhost:${server.port}/user-socket`);
+    await new Promise<void>((resolve, reject) => {
+      ws.onopen = () => resolve();
+      ws.onerror = () => reject(new Error('ws error'));
+      setTimeout(() => reject(new Error('ws open timeout')), 3000);
+    });
+
+    // Give the open handler time to run
+    await new Promise<void>((r) => setTimeout(r, 20));
+    expect(hub.size).toBe(1);
+
+    ws.close();
+    // Give the close handler time to run
+    await new Promise<void>((r) => setTimeout(r, 50));
+    expect(hub.size).toBe(0);
+  });
+
+  it('non-websocket request to /user-socket returns HTTP response (not upgraded)', async () => {
+    const hub = new InMemoryHub();
+    server = createServer({ config: makeConfig(nextPort()), db, logger, hub });
+
+    // Plain HTTP GET to /user-socket without upgrade header
+    const res = await fetch(`http://localhost:${server.port}/user-socket`, {
+      signal: AbortSignal.timeout(2000),
+    });
+    // Should be a 404 (no upgrade header, falls through to dispatch)
+    expect(res.status).toBeGreaterThanOrEqual(400);
+    expect(hub.size).toBe(0);
+  });
+});
+

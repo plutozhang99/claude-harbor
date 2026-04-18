@@ -4,7 +4,7 @@
 - docs/request_v1.md
 - docs/archive/PROGRESS-P0-2026-04-18.md (P0 reference, shipped)
 
-## Current Phase: P1.2 + P1.3 — API routes + WebSocket broadcast hub (parallel)
+## Current Phase: P1.4 — Static file serving
 
 ## Interruption Reason
 
@@ -28,10 +28,11 @@ Not activated for P1:
 - Slot 9 Clinical: N/A
 
 ## Active Task
-P1.2 + P1.3 dispatched in parallel after P1.1 shipped (R2 PASS).
+P1.4 — Static file serving. Pending start.
 
 ## Completed Tasks
-- [x] **P1.1** schema evolution + repo extensions — 2 rounds — code ✅ sec ✅ func ✅ db ✅ type ✅ err ✅
+- [x] **P1.1** schema evolution + repo extensions — commit e160b46 — 2 rounds — code ✅ sec ✅ func ✅ db ✅ type ✅ err ✅
+- [x] **P1.2 + P1.3** API routes + WebSocket broadcast hub — 2 rounds — code ✅ sec ✅ func ✅ type ✅ err ✅
 
 ## Pending Tasks (prioritized)
 
@@ -75,7 +76,9 @@ P1.2 + P1.3 dispatched in parallel after P1.1 shipped (R2 PASS).
 | Task | Code | Sec | Func | DB | A11y | Type | Err | Rounds | Result |
 |------|------|-----|------|----|------|------|-----|--------|--------|
 | P1.1 R1 | PASS w/ MINOR (H1 stubs, M composite cursor, M transaction, M NaN) | PASS w/ MINOR (M cursor, L NaN) | PASS | PASS w/ MINOR (M transaction, M composite cursor) | N/A | PASS w/ MINOR | FAIL w/ MINOR (M transaction, M NaN) | 1 | ⚠️→R2 |
-| P1.1 R2 | PASS (all fixes verified) | N/A (re-review not needed) | PASS | PASS | N/A | N/A | N/A | 2 | ✅ COMPLETE |
+| P1.1 R2 | PASS (all fixes verified) | N/A | PASS | PASS | N/A | N/A | N/A | 2 | ✅ COMPLETE |
+| P1.2+P1.3 R1 | PASS w/ MINOR (M types, M error-handling) | PASS w/ MINOR (M header trust, M WS auth P4) | PASS w/ MINOR (R15 untested) | N/A | N/A | PASS w/ MINOR (M broadcast type, M response types) | PASS w/ MINOR (M error-handling, L ingested_at drift) | 1 | ⚠️→R2 |
+| P1.2+P1.3 R2 | PASS (all fixes verified) | N/A | PASS | N/A | N/A | N/A | N/A | 2 | ✅ COMPLETE |
 
 ## Key Decisions & Accepted Risks
 

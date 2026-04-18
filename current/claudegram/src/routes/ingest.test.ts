@@ -7,6 +7,7 @@ import { dispatch } from '../http.js';
 import type { RouterCtx } from '../http.js';
 import type { MessageRepo, SessionRepo } from '../repo/types.js';
 import type { Logger } from '../logger.js';
+import type { Hub, BroadcastPayload } from '../ws/hub.js';
 import { INGEST_MAX_BODY_BYTES } from './ingest.js';
 
 // ── Shared no-op logger ──────────────────────────────────────────────────────
@@ -16,6 +17,16 @@ const noopLogger: Logger = {
   warn: () => {},
   error: () => {},
 };
+
+
+function makeStubHub(): Hub {
+  return {
+    add: () => {},
+    remove: () => {},
+    broadcast: (_payload: BroadcastPayload) => {},
+    get size() { return 0; },
+  };
+}
 
 function makeReq(
   method: string,
@@ -58,7 +69,19 @@ describe('POST /ingest', () => {
     migrate(db);
     msgRepo = new SqliteMessageRepo(db);
     sessRepo = new SqliteSessionRepo(db);
-    ctx = { msgRepo, sessRepo, logger: noopLogger, db } as RouterCtx;
+    ctx = {
+      msgRepo,
+      sessRepo,
+      logger: noopLogger,
+      db,
+      hub: makeStubHub(),
+      config: {
+        port: 8788,
+        db_path: ':memory:',
+        log_level: 'info',
+        trustCfAccess: false,
+      },
+    };
   });
 
   afterEach(() => {
@@ -270,7 +293,14 @@ describe('POST /ingest', () => {
       sessRepo: stubSessRepo,
       logger: errorCapturingLogger,
       db: null as unknown as RouterCtx['db'],
-    } as RouterCtx;
+      hub: makeStubHub(),
+      config: {
+        port: 8788,
+        db_path: ':memory:',
+        log_level: 'info',
+        trustCfAccess: false,
+      },
+    };
 
     const req = makeReq('POST', '/ingest', validPayload);
     const res = await dispatch(req, stubCtx);
@@ -284,5 +314,126 @@ describe('POST /ingest', () => {
     expect(errors[0]![0]).toBe('ingest_failed');
     expect(errors[0]![1]['session_id']).toBe('s1');
     expect(errors[0]![1]['message_id']).toBe('m1');
+  });
+
+  // ── Hub broadcast tests ──────────────────────────────────────────────────────
+
+  // Case 11: successful ingest → hub.broadcast called twice (message + session_update)
+  it('calls hub.broadcast twice on 200: once with type:message, once with type:session_update', async () => {
+    const broadcasts: BroadcastPayload[] = [];
+    const spyHub: Hub = {
+      add: () => {},
+      remove: () => {},
+      broadcast: (payload: BroadcastPayload) => { broadcasts.push(payload); },
+      get size() { return 0; },
+    };
+
+    const req = makeReq('POST', '/ingest', validPayload);
+    const res = await dispatch(req, { ...ctx, hub: spyHub });
+    expect(res.status).toBe(200);
+
+    expect(broadcasts).toHaveLength(2);
+    expect(broadcasts[0]!.type).toBe('message');
+    expect(broadcasts[1]!.type).toBe('session_update');
+
+    // Fix D: message broadcast must include ingested_at
+    const msgPayload = broadcasts[0] as Extract<BroadcastPayload, { type: 'message' }>;
+    expect(typeof msgPayload.message.ingested_at).toBe('number');
+  });
+
+  // Case 12: 400 response (invalid payload) → hub.broadcast NOT called
+  it('does NOT call hub.broadcast on 400 (invalid payload)', async () => {
+    const broadcasts: BroadcastPayload[] = [];
+    const spyHub: Hub = {
+      add: () => {},
+      remove: () => {},
+      broadcast: (payload: BroadcastPayload) => { broadcasts.push(payload); },
+      get size() { return 0; },
+    };
+
+    const badPayload = { message: { id: 'm1', direction: 'assistant', ts: 0, content: 'hi' } };
+    const req = makeReq('POST', '/ingest', badPayload);
+    const res = await dispatch(req, { ...ctx, hub: spyHub });
+    expect(res.status).toBe(400);
+    expect(broadcasts).toHaveLength(0);
+  });
+
+  // Case 13: 413 response → hub.broadcast NOT called
+  it('does NOT call hub.broadcast on 413 (payload too large)', async () => {
+    const broadcasts: BroadcastPayload[] = [];
+    const spyHub: Hub = {
+      add: () => {},
+      remove: () => {},
+      broadcast: (payload: BroadcastPayload) => { broadcasts.push(payload); },
+      get size() { return 0; },
+    };
+
+    const req = new Request('http://localhost/ingest', {
+      method: 'POST',
+      headers: { 'Content-Length': String(INGEST_MAX_BODY_BYTES + 1) },
+      body: '{}',
+    });
+    const res = await dispatch(req, { ...ctx, hub: spyHub });
+    expect(res.status).toBe(413);
+    expect(broadcasts).toHaveLength(0);
+  });
+
+  // Case 14: 500 (repo throws) → hub.broadcast NOT called
+  it('does NOT call hub.broadcast on 500 (repo throws)', async () => {
+    const broadcasts: BroadcastPayload[] = [];
+    const spyHub: Hub = {
+      add: () => {},
+      remove: () => {},
+      broadcast: (payload: BroadcastPayload) => { broadcasts.push(payload); },
+      get size() { return 0; },
+    };
+
+    const throwingMsgRepo: MessageRepo = {
+      insert: () => { throw new Error('DB exploded'); },
+      findBySession: () => [],
+      findBySessionPage: () => ({ messages: [], has_more: false }),
+    };
+
+    const throwingSessRepo: SessionRepo = {
+      upsert: () => {},
+      findById: () => null,
+      findAll: () => [],
+    };
+
+    const failCtx: RouterCtx = {
+      msgRepo: throwingMsgRepo,
+      sessRepo: throwingSessRepo,
+      logger: noopLogger,
+      db: null as unknown as RouterCtx['db'],
+      hub: spyHub,
+      config: {
+        port: 8788,
+        db_path: ':memory:',
+        log_level: 'info',
+        trustCfAccess: false,
+      },
+    };
+
+    const req = makeReq('POST', '/ingest', validPayload);
+    const res = await dispatch(req, failCtx);
+    expect(res.status).toBe(500);
+    expect(broadcasts).toHaveLength(0);
+  });
+
+  // Case 15 (R15): hub.broadcast throws → ingest still returns 200
+  it('returns 200 even when hub.broadcast throws (best-effort broadcast)', async () => {
+    const throwingHub: Hub = {
+      add: () => {},
+      remove: () => {},
+      broadcast: (_payload: BroadcastPayload) => { throw new Error('hub exploded'); },
+      get size() { return 0; },
+    };
+
+    const req = makeReq('POST', '/ingest', validPayload);
+    const res = await dispatch(req, { ...ctx, hub: throwingHub });
+    expect(res.status).toBe(200);
+    const body = await res.json() as { ok: boolean; message_id: string };
+    expect(body.ok).toBe(true);
+    expect(body.message_id).toBe('m1');
   });
 });

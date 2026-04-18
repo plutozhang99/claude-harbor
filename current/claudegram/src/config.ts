@@ -17,6 +17,9 @@ export const configSchema = z.object({
   log_level: z
     .enum(["debug", "info", "warn", "error"])
     .default("info"),
+  trustCfAccess: z
+    .boolean()
+    .default(false),
 });
 
 export type Config = z.infer<typeof configSchema>;
@@ -26,5 +29,6 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     port: env["CLAUDEGRAM_PORT"],
     db_path: env["CLAUDEGRAM_DB_PATH"],
     log_level: env["CLAUDEGRAM_LOG_LEVEL"],
+    trustCfAccess: env["TRUST_CF_ACCESS"] === "true",
   });
 }

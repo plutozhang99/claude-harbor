@@ -2,6 +2,7 @@ import { Buffer } from 'node:buffer';
 import { z } from 'zod';
 import { jsonResponse } from '../http.js';
 import type { RouterCtx } from '../http.js';
+import type { Session } from '../repo/types.js';
 
 export const INGEST_MAX_BODY_BYTES = 1_048_576; // 1 MiB
 
@@ -29,7 +30,7 @@ export type IngestPayload = z.infer<typeof ingestSchema>;
 
 export async function handleIngest(
   req: Request,
-  deps: Pick<RouterCtx, 'msgRepo' | 'sessRepo' | 'logger'>,
+  deps: Pick<RouterCtx, 'msgRepo' | 'sessRepo' | 'logger' | 'hub'>,
 ): Promise<Response> {
   if (req.method !== 'POST') {
     return jsonResponse(405, METHOD_NOT_ALLOWED);
@@ -87,6 +88,7 @@ export async function handleIngest(
 
   const { session_id, session_name, message } = result.data;
 
+  let sess: Readonly<Session> | null = null;
   try {
     // P1: wrap session upsert + message insert in a single transaction to prevent orphan session on insert failure.
     deps.sessRepo.upsert({ id: session_id, name: session_name ?? session_id, now: Date.now() });
@@ -97,6 +99,8 @@ export async function handleIngest(
       ts: message.ts,
       content: message.content,
     });
+    // Fetch the final session state for broadcast (has status, last_read_at).
+    sess = deps.sessRepo.findById(session_id);
   } catch (err: unknown) {
     deps.logger.error('ingest_failed', {
       err: String(err),
@@ -104,6 +108,30 @@ export async function handleIngest(
       message_id: message.id,
     });
     return jsonResponse(500, INTERNAL_ERROR);
+  }
+
+  // Broadcast events to connected WebSocket clients — best-effort, never fails ingest.
+  try {
+    // ingested_at is the DB default (unixepoch('subsec')*1000); we approximate with
+    // Date.now() which is always >= the DB value and correct within ~1-2ms.
+    const broadcastIngestedAt = Date.now();
+    deps.hub.broadcast({
+      type: 'message',
+      session_id,
+      message: {
+        session_id,
+        id: message.id,
+        direction: message.direction,
+        ts: message.ts,
+        content: message.content,
+        ingested_at: broadcastIngestedAt, // wall-clock estimate; may drift 1-2ms from DB value
+      },
+    });
+    if (sess !== null) {
+      deps.hub.broadcast({ type: 'session_update', session: sess });
+    }
+  } catch (broadcastErr: unknown) {
+    deps.logger.error('broadcast_failed', { err: String(broadcastErr), session_id });
   }
 
   return jsonResponse(200, { ok: true, message_id: message.id });

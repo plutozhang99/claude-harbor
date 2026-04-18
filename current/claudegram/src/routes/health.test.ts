@@ -4,6 +4,7 @@ import { migrate } from '../db/migrate.js';
 import type { Database } from '../db/client.js';
 import { dispatch } from '../http.js';
 import type { RouterCtx } from '../http.js';
+import type { Hub, BroadcastPayload } from '../ws/hub.js';
 import type { MessageRepo, SessionRepo } from '../repo/types.js';
 
 // Minimal stub repos — no real DB interaction needed for repo methods.
@@ -31,6 +32,15 @@ function makeReq(method: string, path: string): Request {
 }
 
 let db: Database;
+function makeStubHub(): Hub {
+  return {
+    add: () => {},
+    remove: () => {},
+    broadcast: (_payload: BroadcastPayload) => {},
+    get size() { return 0; },
+  };
+}
+
 let ctx: RouterCtx;
 
 beforeEach(() => {
@@ -41,6 +51,13 @@ beforeEach(() => {
     sessRepo: stubSessRepo,
     logger: stubLogger,
     db,
+    hub: makeStubHub(),
+    config: {
+      port: 8788,
+      db_path: './data/claudegram.db',
+      log_level: 'info',
+      trustCfAccess: false,
+    },
   };
 });
 

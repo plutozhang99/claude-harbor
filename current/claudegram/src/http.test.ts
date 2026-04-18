@@ -1,8 +1,13 @@
-import { describe, it, expect, afterAll } from 'bun:test';
+import { describe, it, expect, afterAll, mock, spyOn } from 'bun:test';
 import { dispatch, jsonResponse } from './http.js';
 import type { RouterCtx } from './http.js';
 import type { MessageRepo, SessionRepo } from './repo/types.js';
 import { openDatabase, closeDatabase } from './db/client.js';
+import type { Hub, BroadcastPayload } from './ws/hub.js';
+
+import * as sessionsModule from './routes/api/sessions.js';
+import * as messagesModule from './routes/api/messages.js';
+import * as meModule from './routes/api/me.js';
 
 // Minimal stub repos — no real DB needed.
 const stubMsgRepo: MessageRepo = {
@@ -25,6 +30,16 @@ afterAll(() => {
   closeDatabase(db);
 });
 
+
+function makeStubHub(): Hub {
+  return {
+    add: () => {},
+    remove: () => {},
+    broadcast: (_payload: BroadcastPayload) => {},
+    get size() { return 0; },
+  };
+}
+
 const ctx: RouterCtx = {
   msgRepo: stubMsgRepo,
   sessRepo: stubSessRepo,
@@ -35,6 +50,13 @@ const ctx: RouterCtx = {
     error: () => {},
   },
   db,
+  hub: makeStubHub(),
+  config: {
+    port: 8788,
+    db_path: './data/claudegram.db',
+    log_level: 'info',
+    trustCfAccess: false,
+  },
 };
 
 function makeReq(method: string, path: string): Request {
@@ -50,8 +72,8 @@ describe('dispatch', () => {
     expect(body).toEqual({ ok: false, error: 'not found' });
   });
 
-  it('/api/foo → 404 (reserved prefix)', async () => {
-    const res = await dispatch(makeReq('GET', '/api/foo'), ctx);
+  it('/api/unknown → 404 (unrecognised api path)', async () => {
+    const res = await dispatch(makeReq('GET', '/api/unknown'), ctx);
     expect(res.status).toBe(404);
     const body = await res.json();
     expect(body).toEqual({ ok: false, error: 'not found' });
@@ -69,6 +91,33 @@ describe('dispatch', () => {
     expect(res.status).toBe(404);
     const body = await res.json();
     expect(body).toEqual({ ok: false, error: 'not found' });
+  });
+
+  it('/api/sessions → routed to handleApiSessions', async () => {
+    const spy = spyOn(sessionsModule, 'handleApiSessions').mockReturnValue(
+      new Response('{}', { status: 200 }),
+    );
+    await dispatch(makeReq('GET', '/api/sessions'), ctx);
+    expect(spy).toHaveBeenCalledTimes(1);
+    spy.mockRestore();
+  });
+
+  it('/api/messages → routed to handleApiMessages', async () => {
+    const spy = spyOn(messagesModule, 'handleApiMessages').mockResolvedValue(
+      new Response('{}', { status: 200 }),
+    );
+    await dispatch(makeReq('GET', '/api/messages?session_id=x'), ctx);
+    expect(spy).toHaveBeenCalledTimes(1);
+    spy.mockRestore();
+  });
+
+  it('/api/me → routed to handleApiMe', async () => {
+    const spy = spyOn(meModule, 'handleApiMe').mockReturnValue(
+      new Response('{}', { status: 200 }),
+    );
+    await dispatch(makeReq('GET', '/api/me'), ctx);
+    expect(spy).toHaveBeenCalledTimes(1);
+    spy.mockRestore();
   });
 });
 

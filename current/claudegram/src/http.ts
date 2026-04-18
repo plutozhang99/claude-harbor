@@ -1,14 +1,21 @@
+import type { Config } from './config.js';
 import type { Logger } from './logger.js';
 import type { MessageRepo, SessionRepo } from './repo/types.js';
 import type { Database } from './db/client.js';
+import type { Hub } from './ws/hub.js';
 import { handleHealth } from './routes/health.js';
 import { handleIngest } from './routes/ingest.js';
+import { handleApiSessions } from './routes/api/sessions.js';
+import { handleApiMessages } from './routes/api/messages.js';
+import { handleApiMe } from './routes/api/me.js';
 
 export interface RouterCtx {
   readonly msgRepo: MessageRepo;
   readonly sessRepo: SessionRepo;
   readonly logger: Logger;
   readonly db: Database;
+  readonly hub: Hub;
+  readonly config: Config;
 }
 
 export function jsonResponse(status: number, body: unknown): Response {
@@ -32,6 +39,19 @@ export async function dispatch(req: Request, ctx: RouterCtx): Promise<Response> 
   // Route: /ingest (POST only; all other methods → 405 via handleIngest)
   if (path === '/ingest') {
     return handleIngest(req, ctx);
+  }
+
+  // API routes
+  if (path === '/api/sessions') {
+    return handleApiSessions(req, ctx);
+  }
+
+  if (path === '/api/messages') {
+    return handleApiMessages(req, ctx);
+  }
+
+  if (path === '/api/me') {
+    return handleApiMe(req, ctx);
   }
 
   // Reserved prefixes and all unknown paths → 404.

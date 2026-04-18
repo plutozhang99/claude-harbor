@@ -4,11 +4,15 @@ import type { Database } from './db/client.js';
 import { migrate } from './db/migrate.js';
 import { SqliteMessageRepo, SqliteSessionRepo } from './repo/sqlite.js';
 import { dispatch } from './http.js';
+import { InMemoryHub } from './ws/hub.js';
+import type { Hub } from './ws/hub.js';
 
 export interface ServerDeps {
   readonly config: Config;
   readonly db: Database;
   readonly logger: Logger;
+  /** Optional hub — defaults to a new InMemoryHub. Pass your own for testing. */
+  readonly hub?: Hub;
 }
 
 export interface RunningServer {
@@ -24,11 +28,37 @@ export function createServer(deps: ServerDeps): RunningServer {
 
   const msgRepo = new SqliteMessageRepo(db);
   const sessRepo = new SqliteSessionRepo(db);
-  const ctx = { msgRepo, sessRepo, logger, db };
+  const hub = deps.hub ?? new InMemoryHub();
+  const ctx = { msgRepo, sessRepo, logger, db, hub, config };
 
   const server = Bun.serve({
     port: config.port,
-    fetch: (req) => dispatch(req, ctx),
+    fetch: (req, bunServer) => {
+      const url = new URL(req.url);
+      if (
+        url.pathname === '/user-socket' &&
+        req.headers.get('upgrade')?.toLowerCase() === 'websocket'
+      ) {
+        const upgraded = bunServer.upgrade(req);
+        // Bun's upgrade idiom: return undefined after successful upgrade; cast silences the Response return type.
+        if (upgraded) return undefined as unknown as Response;
+        return new Response('upgrade failed', { status: 400 });
+      }
+      return dispatch(req, ctx);
+    },
+    websocket: {
+      open: (ws) => {
+        hub.add(ws);
+        logger.info('ws_open', { size: hub.size });
+      },
+      close: (ws) => {
+        hub.remove(ws);
+        logger.info('ws_close', { size: hub.size });
+      },
+      message: () => {
+        // P1: ignore client → server messages. P2 will handle replies.
+      },
+    },
     error: (err) => {
       logger.error('unhandled', { err: String(err) });
       return new Response('internal error', { status: 500 });
