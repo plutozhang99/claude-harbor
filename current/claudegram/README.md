@@ -1,6 +1,17 @@
 # claudegram
 
-P0 MVP: HTTP ingest + SQLite store + optional fakechat fork webhook. No auth, localhost only.
+P1: Full-stack PWA — HTTP ingest + SQLite store + WebSocket live updates + React PWA UI. Localhost only. No auth in P1.
+
+---
+
+## P1 Features
+
+| Feature | Details |
+|---|---|
+| **PWA** | React single-page app served at `/`; shows session list + message history |
+| **WebSocket** | Live event stream at `/user-socket` — pushes `message` and `session_update` events as new messages arrive |
+| **REST API** | `GET /api/sessions`, `GET /api/messages`, `GET /api/me` |
+| **Ingest** | `POST /ingest` persists messages and broadcasts to all connected WS clients |
 
 ---
 
@@ -24,6 +35,37 @@ P0 MVP: HTTP ingest + SQLite store + optional fakechat fork webhook. No auth, lo
 
 ---
 
+## Running the PWA
+
+Open `http://localhost:8788/` in a browser after starting the server.
+
+**What works in P1:**
+- Session list (left panel) — live-updating as new messages arrive
+- Message history per session with infinite scroll / pagination
+- Live message feed via WebSocket — new messages appear without refresh
+
+**Deferred to P2:**
+- Sending replies from the browser (P2 bidirectional relay)
+- Notifications / Web Push (P5)
+- Cloudflare Access auth (P4)
+
+---
+
+## WebSocket contract
+
+Connect to `ws://localhost:8788/user-socket`. The server pushes JSON text frames for each broadcast event.
+
+Reference: `docs/request_v1.md §12.6` (full event spec).
+
+| Event `type` | Shape | When sent |
+|---|---|---|
+| `message` | `{ type, session_id, message: { id, direction, ts, content, session_id, ingested_at } }` | After every successful POST /ingest |
+| `session_update` | `{ type, session: { id, name, status, last_read_at, first_seen_at, last_seen_at } }` | After every successful POST /ingest (reflects latest session state) |
+
+Client-to-server messages are **ignored** in P1 — the socket is receive-only.
+
+---
+
 ## Env vars
 
 | Variable | Default | Description |
@@ -31,6 +73,7 @@ P0 MVP: HTTP ingest + SQLite store + optional fakechat fork webhook. No auth, lo
 | `CLAUDEGRAM_PORT` | `8788` | HTTP listen port (1–65535) |
 | `CLAUDEGRAM_DB_PATH` | `./data/claudegram.db` | SQLite file path. Directory is auto-created; `..` segments are rejected. |
 | `CLAUDEGRAM_LOG_LEVEL` | `info` | One of `debug`, `info`, `warn`, `error` |
+| `TRUST_CF_ACCESS` | `false` | Set `true` only when running behind Cloudflare Access (P4+). When true, `/api/me` reads the `Cf-Access-Authenticated-User-Email` header instead of returning `local@dev`. |
 
 ---
 
@@ -39,9 +82,12 @@ P0 MVP: HTTP ingest + SQLite store + optional fakechat fork webhook. No auth, lo
 | Method | Path | Status codes | Notes |
 |---|---|---|---|
 | `GET` | `/health` | 200 / 503 | `SELECT 1` health probe; 503 if SQLite unreachable |
-| `POST` | `/ingest` | 200 / 400 / 413 / 500 | 1 MiB body cap, streaming enforced |
-| `*` | `/api/*` | 404 | Reserved for P1 (sessions + messages API) |
-| `*` | `/web/*` | 404 | Reserved for P1 (PWA static assets) |
+| `POST` | `/ingest` | 200 / 400 / 413 / 500 | 1 MiB body cap, streaming enforced; broadcasts to WS clients |
+| `GET` | `/api/sessions` | 200 / 500 | List all sessions ordered by `last_seen_at` DESC; includes `unread_count` |
+| `GET` | `/api/messages` | 200 / 400 / 500 | `?session_id=X[&before=<msg_id>][&limit=N]`; paginated, newest-first |
+| `GET` | `/api/me` | 200 / 405 | Returns `{ ok, email }` — `local@dev` unless TRUST_CF_ACCESS is set |
+| `WS` | `/user-socket` | — | WebSocket live event stream (see WebSocket contract above) |
+| `GET` | `/` | 200 | React PWA entry point |
 
 ---
 
@@ -77,56 +123,77 @@ P0 MVP: HTTP ingest + SQLite store + optional fakechat fork webhook. No auth, lo
 
 ## Architecture — "bridge killed" trade-off matrix
 
-Trade-offs P0 accepts. Source: spec §5 + PROGRESS.md Key Decisions.
+Key decisions and accepted trade-offs. Source: spec §5.
 
-| Feature | P0 stance | Rationale |
+| Feature | Stance | Rationale |
 |---|---|---|
-| Webhook retry queue | Not implemented; fire-and-forget with structured stderr log | P2 concern. Adds complexity; P0 is localhost + trusted client. |
-| Auth (CF Access) | Not in server; headers consumed by client only | Localhost-only in P0 (spec §8.5 pt 6). CF Access wired in P4. |
-| Schema versioning | Skipped; `IF NOT EXISTS` silently hides column drift | `TODO(P1)` in `migrate.ts`. |
+| Webhook retry queue | Not implemented; fire-and-forget with structured stderr log | P2 concern. Adds complexity; P1 is localhost + trusted client. |
+| Auth (CF Access) | Not in server in P1; `TRUST_CF_ACCESS=false` default | CF Access wired in P4. `local@dev` fallback for local use. |
+| Schema versioning | Skipped; `IF NOT EXISTS` silently hides column drift | Known gap; P2 concern. |
 | Partial-ingest rollback | No transaction around session upsert + message insert | Orphan session possible on insert failure; documented as known gap. |
-| Integration test isolation | In-process `createServer` factory (not subprocess) | Subprocess variant is `.skip` (flaky in CI); run manually. Q3 in PROGRESS.md. |
-| JSON depth-bomb hardening | `JSON.parse` is unhardened | Acceptable for localhost + trusted client. P1 concern. |
+| Integration test isolation | In-process `createServer` factory + port 0 (not subprocess) | Subprocess variant is flaky in CI; run manually. |
+| JSON depth-bomb hardening | `JSON.parse` is unhardened | Acceptable for localhost + trusted client. |
 | Messages lost when claudegram crashes | In-flight messages during crash may drop | launchd restarts within seconds; fakechat retries webhook. |
-| Messages lost when claudegram machine is offline | fakechat webhooks fail and drop (P0) | P2 adds bounded retry queue in fakechat. |
+| Messages lost when claudegram machine is offline | fakechat webhooks fail and drop | P2 adds bounded retry queue in fakechat. |
+| WS reply path | Server ignores client→server frames in P1 | P2 will add bidirectional relay. |
 
 ---
 
-## P0 scope boundary
+## P1 scope boundary
 
 In scope:
-- HTTP ingest endpoint (`POST /ingest`)
+- HTTP ingest endpoint (`POST /ingest`) with WS broadcast
 - SQLite persistence (sessions + messages)
+- REST API (`/api/sessions`, `/api/messages`, `/api/me`)
+- WebSocket live event stream at `/user-socket`
+- React PWA at `/` (session list + message history + live updates)
 - fakechat fork: optional `CLAUDEGRAM_URL` webhook, stable `session_id`, multi-session via `CLAUDE_SESSION_ID`
 
-Out of scope (not yet built):
-- Web UI / PWA (P1)
+Out of scope (deferred):
+- Sending replies from the browser (P2 bidirectional relay)
 - Auth via CF Access (P4)
 - Webhook retry queue (P2)
-- Schema migrations beyond idempotent `CREATE IF NOT EXISTS` (P1)
+- Schema migrations beyond idempotent `CREATE IF NOT EXISTS` (P2)
 - cloudflared tunnel / launchd CLI (P4)
 - Web Push / VAPID (P5)
 
 ---
 
-## Known gaps (P1 follow-ups)
+## Known gaps (P2 follow-ups)
 
 - `schema_version` table — column drift is silently hidden by `IF NOT EXISTS`
 - Partial-ingest transaction — session upsert and message insert are not atomic; orphan session possible
 - Webhook retry queue — messages drop if claudegram is unreachable when fakechat POSTs
-- `JSON.parse` depth limit — no protection against depth-bomb payloads (acceptable at P0 scope)
+- `JSON.parse` depth limit — no protection against depth-bomb payloads (acceptable at P1 scope)
 - Subprocess-based SIGTERM integration test — currently `.skip` due to CI flakiness; run manually
-- Web UI reading `/api/*` routes — reserved with 404, not yet scaffolded
+- WS reply path — client→server frames are silently ignored; P2 will add bidirectional relay
+
+---
+
+## Tests
+
+```bash
+bun test              # run all tests (unit + integration)
+bun test --watch      # re-run on file changes
+bunx tsc --noEmit     # TypeScript type check (must exit 0)
+bun test --coverage   # coverage report
+```
+
+Integration tests (`src/integration.test.ts`, `src/integration-api.test.ts`) boot a real in-process server on an ephemeral port (port 0) and exercise the full request path — no mocks.
+
+---
+
+## Generate icons
+
+```bash
+bun run generate-icons
+```
+
+Generates all PWA icon sizes from the source SVG into `web/icons/`.
 
 ---
 
 ## Local development
-
-```bash
-bun test              # run all tests
-bunx tsc --noEmit     # type check
-bun test --coverage   # coverage report
-```
 
 ---
 
