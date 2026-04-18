@@ -81,6 +81,7 @@ describe('POST /ingest', () => {
         log_level: 'info',
         trustCfAccess: false,
       },
+      webRoot: '/tmp/__claudegram_test_nonexistent_web__',
     };
   });
 
@@ -300,6 +301,7 @@ describe('POST /ingest', () => {
         log_level: 'info',
         trustCfAccess: false,
       },
+      webRoot: '/tmp/__claudegram_test_nonexistent_web__',
     };
 
     const req = makeReq('POST', '/ingest', validPayload);
@@ -412,6 +414,7 @@ describe('POST /ingest', () => {
         log_level: 'info',
         trustCfAccess: false,
       },
+      webRoot: '/tmp/__claudegram_test_nonexistent_web__',
     };
 
     const req = makeReq('POST', '/ingest', validPayload);

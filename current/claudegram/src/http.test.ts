@@ -57,6 +57,8 @@ const ctx: RouterCtx = {
     log_level: 'info',
     trustCfAccess: false,
   },
+  // Point at a nonexistent dir so static file handlers return 404 (no disk I/O needed).
+  webRoot: '/tmp/__claudegram_test_nonexistent_web__',
 };
 
 function makeReq(method: string, path: string): Request {

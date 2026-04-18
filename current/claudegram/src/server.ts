@@ -1,3 +1,4 @@
+import path from 'node:path';
 import type { Config } from './config.js';
 import type { Logger } from './logger.js';
 import type { Database } from './db/client.js';
@@ -13,6 +14,8 @@ export interface ServerDeps {
   readonly logger: Logger;
   /** Optional hub — defaults to a new InMemoryHub. Pass your own for testing. */
   readonly hub?: Hub;
+  /** Optional absolute path to the web root. Defaults to <cwd>/web. */
+  readonly webRoot?: string;
 }
 
 export interface RunningServer {
@@ -29,7 +32,8 @@ export function createServer(deps: ServerDeps): RunningServer {
   const msgRepo = new SqliteMessageRepo(db);
   const sessRepo = new SqliteSessionRepo(db);
   const hub = deps.hub ?? new InMemoryHub();
-  const ctx = { msgRepo, sessRepo, logger, db, hub, config };
+  const webRoot = path.resolve(deps.webRoot ?? path.join(process.cwd(), 'web'));
+  const ctx = { msgRepo, sessRepo, logger, db, hub, config, webRoot };
 
   const server = Bun.serve({
     port: config.port,

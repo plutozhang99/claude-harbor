@@ -58,6 +58,7 @@ beforeEach(() => {
       log_level: 'info',
       trustCfAccess: false,
     },
+    webRoot: '/tmp/__claudegram_test_nonexistent_web__',
   };
 });
 

@@ -8,6 +8,7 @@ import { handleIngest } from './routes/ingest.js';
 import { handleApiSessions } from './routes/api/sessions.js';
 import { handleApiMessages } from './routes/api/messages.js';
 import { handleApiMe } from './routes/api/me.js';
+import { handleRoot, handleWebAsset } from './routes/static.js';
 
 export interface RouterCtx {
   readonly msgRepo: MessageRepo;
@@ -16,6 +17,7 @@ export interface RouterCtx {
   readonly db: Database;
   readonly hub: Hub;
   readonly config: Config;
+  readonly webRoot: string;
 }
 
 export function jsonResponse(status: number, body: unknown): Response {
@@ -30,6 +32,12 @@ const NOT_FOUND = { ok: false, error: 'not found' } as const;
 export async function dispatch(req: Request, ctx: RouterCtx): Promise<Response> {
   const url = new URL(req.url);
   const path = url.pathname;
+
+  const staticDeps = { webRoot: ctx.webRoot, logger: ctx.logger };
+
+  // Static routes
+  if (path === '/') return handleRoot(req, staticDeps);
+  if (path.startsWith('/web/')) return handleWebAsset(req, staticDeps);
 
   // Route: /health (all methods handled inside handleHealth)
   if (path === '/health') {
@@ -54,8 +62,8 @@ export async function dispatch(req: Request, ctx: RouterCtx): Promise<Response> 
     return handleApiMe(req, ctx);
   }
 
-  // Reserved prefixes and all unknown paths → 404.
-  if (path.startsWith('/api/') || path.startsWith('/web/')) {
+  // Reserved prefix fallback and all unknown paths → 404.
+  if (path.startsWith('/api/')) {
     return jsonResponse(404, NOT_FOUND);
   }
 

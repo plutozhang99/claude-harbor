@@ -4,7 +4,7 @@
 - docs/request_v1.md
 - docs/archive/PROGRESS-P0-2026-04-18.md (P0 reference, shipped)
 
-## Current Phase: P1.4 — Static file serving
+## Current Phase: P1.5 — PWA shell (HTML/CSS/manifest/sw/icons)
 
 ## Interruption Reason
 
@@ -28,11 +28,12 @@ Not activated for P1:
 - Slot 9 Clinical: N/A
 
 ## Active Task
-P1.4 — Static file serving. Pending start.
+P1.5 — PWA shell. Pending start.
 
 ## Completed Tasks
 - [x] **P1.1** schema evolution + repo extensions — commit e160b46 — 2 rounds — code ✅ sec ✅ func ✅ db ✅ type ✅ err ✅
-- [x] **P1.2 + P1.3** API routes + WebSocket broadcast hub — 2 rounds — code ✅ sec ✅ func ✅ type ✅ err ✅
+- [x] **P1.2 + P1.3** API routes + WebSocket broadcast hub — commit 1f81c9e — 2 rounds — code ✅ sec ✅ func ✅ type ✅ err ✅
+- [x] **P1.4** static file serving + traversal guard + nosniff + extension allowlist — 2 rounds — sec ✅ func ✅
 
 ## Pending Tasks (prioritized)
 
@@ -79,6 +80,8 @@ P1.4 — Static file serving. Pending start.
 | P1.1 R2 | PASS (all fixes verified) | N/A | PASS | PASS | N/A | N/A | N/A | 2 | ✅ COMPLETE |
 | P1.2+P1.3 R1 | PASS w/ MINOR (M types, M error-handling) | PASS w/ MINOR (M header trust, M WS auth P4) | PASS w/ MINOR (R15 untested) | N/A | N/A | PASS w/ MINOR (M broadcast type, M response types) | PASS w/ MINOR (M error-handling, L ingested_at drift) | 1 | ⚠️→R2 |
 | P1.2+P1.3 R2 | PASS (all fixes verified) | N/A | PASS | N/A | N/A | N/A | N/A | 2 | ✅ COMPLETE |
+| P1.4 R1 | PASS | PASS w/ MINOR (M nosniff, M allowlist, L traversal comment) | PASS | N/A | N/A | PASS | PASS | 1 | ⚠️→R2 |
+| P1.4 R2 | PASS (nosniff header + allowlist enforced + comment added; +2 tests) | PASS | PASS | N/A | N/A | N/A | N/A | 2 | ✅ COMPLETE |
 
 ## Key Decisions & Accepted Risks
 
