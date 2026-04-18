@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#1e293b">
+  <title>claudegram</title>
+  <link rel="manifest" href="/web/manifest.webmanifest">
+  <link rel="icon" href="/web/icons/icon-192.png" type="image/png">
+  <link rel="stylesheet" href="/web/style.css">
+</head>
+<body>
+  <a href="#messages" class="skip-link">Skip to messages</a>
+
+  <header>
+    <button class="sidebar-toggle" id="sidebar-toggle" aria-controls="sidebar" aria-expanded="false" aria-label="Toggle sessions sidebar">&#9776;</button>
+    <h1 class="app-name">claudegram</h1>
+    <span class="conn-pill" id="conn-pill" aria-live="polite" aria-label="Connection status">connecting</span>
+  </header>
+
+  <div class="layout">
+    <aside id="sidebar" aria-label="Sessions">
+      <h2 class="sidebar-heading">Sessions</h2>
+      <ul id="session-list" role="listbox" aria-label="Open sessions">
+        <li class="session-placeholder" role="presentation">loading&hellip;</li>
+      </ul>
+    </aside>
+
+    <main aria-label="Messages">
+      <ol class="messages" id="messages" aria-live="polite" aria-label="Message history"></ol>
+
+      <form class="compose" id="compose" aria-label="Compose message">
+        <label for="compose-text" class="sr-only">Message</label>
+        <textarea
+          id="compose-text"
+          name="text"
+          rows="3"
+          placeholder="Type a message&hellip;"
+          autocomplete="off"
+        ></textarea>
+        <div class="compose-row">
+          <button type="submit" id="send-btn" disabled aria-label="Send message">Send</button>
+        </div>
+      </form>
+    </main>
+  </div>
+
+  <script type="module" src="/web/js/index.js"></script>
+  <script>
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('/web/sw.js').catch(() => {});
+      });
+    }
+  </script>
+</body>
+</html>

@@ -4,7 +4,7 @@
 - docs/request_v1.md
 - docs/archive/PROGRESS-P0-2026-04-18.md (P0 reference, shipped)
 
-## Current Phase: P1.5 — PWA shell (HTML/CSS/manifest/sw/icons)
+## Current Phase: P1.6 — PWA JS modules
 
 ## Interruption Reason
 
@@ -28,12 +28,13 @@ Not activated for P1:
 - Slot 9 Clinical: N/A
 
 ## Active Task
-P1.5 — PWA shell. Pending start.
+P1.6 — PWA JS modules. Pending start.
 
 ## Completed Tasks
 - [x] **P1.1** schema evolution + repo extensions — commit e160b46 — 2 rounds — code ✅ sec ✅ func ✅ db ✅ type ✅ err ✅
 - [x] **P1.2 + P1.3** API routes + WebSocket broadcast hub — commit 1f81c9e — 2 rounds — code ✅ sec ✅ func ✅ type ✅ err ✅
-- [x] **P1.4** static file serving + traversal guard + nosniff + extension allowlist — 2 rounds — sec ✅ func ✅
+- [x] **P1.4** static file serving + traversal guard + nosniff + extension allowlist — commit dadf32d — 2 rounds — sec ✅ func ✅
+- [x] **P1.5** PWA shell (index.html, style.css, manifest, sw.js, 192/512 icons, module stubs) + integration tests — 2 rounds — a11y ✅ func ✅ (via integration-static.test.ts)
 
 ## Pending Tasks (prioritized)
 
@@ -82,6 +83,8 @@ P1.5 — PWA shell. Pending start.
 | P1.2+P1.3 R2 | PASS (all fixes verified) | N/A | PASS | N/A | N/A | N/A | N/A | 2 | ✅ COMPLETE |
 | P1.4 R1 | PASS | PASS w/ MINOR (M nosniff, M allowlist, L traversal comment) | PASS | N/A | N/A | PASS | PASS | 1 | ⚠️→R2 |
 | P1.4 R2 | PASS (nosniff header + allowlist enforced + comment added; +2 tests) | PASS | PASS | N/A | N/A | N/A | N/A | 2 | ✅ COMPLETE |
+| P1.5 R1 | N/A (content only) | N/A | PASS (7 integration tests for all shell assets) | N/A | PASS w/ MINOR (M touch target, M duplicate label, M contrast, L session keyboard, L reduced-motion, L h1) | N/A | N/A | 1 | ⚠️→R2 |
+| P1.5 R2 | PASS (all a11y fixes applied: 44px toggle, h1 landmark, role=listbox, removed duplicate aria-label, brightened pill text, prefers-reduced-motion guard) | N/A | PASS | N/A | PASS | N/A | N/A | 2 | ✅ COMPLETE |
 
 ## Key Decisions & Accepted Risks
 
