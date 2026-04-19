@@ -53,6 +53,7 @@ const stubSessionRegistry: SessionRegistry = {
   tryRegister: () => ({ ok: true, disposable: { [Symbol.dispose]: () => {} } }),
   send: () => ({ ok: true }),
   unregister: () => {},
+  closeBySession: () => {},
   has: () => false,
   get size() { return 0; },
 };

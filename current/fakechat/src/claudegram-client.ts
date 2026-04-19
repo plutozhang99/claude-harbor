@@ -59,6 +59,7 @@ export interface ClaudegramClientConfig {
   readonly serviceTokenSecret?: string      // CF-Access-Client-Secret
   readonly sessionId: string               // already-derived ULID/env
   readonly sessionName?: string
+  readonly cwd?: string                     // process.cwd() — bridges Claude Code statusline data
   readonly outboundQueueCap?: number        // default 100
   readonly reconnectBaseMs?: number         // default 250
   readonly reconnectMaxMs?: number          // default 8000
@@ -201,10 +202,11 @@ export class ClaudegramClient {
       this._isConnected = true
       this.reconnectAttempt = 0
       this.log.info('claudegram_ws_connected', { url: wsUrl })
-      const frame: { type: 'register'; session_id: string; session_name?: string } = {
+      const frame: { type: 'register'; session_id: string; session_name?: string; cwd?: string } = {
         type: 'register',
         session_id: this.cfg.sessionId,
         ...(this.cfg.sessionName !== undefined ? { session_name: this.cfg.sessionName } : {}),
+        ...(this.cfg.cwd !== undefined ? { cwd: this.cfg.cwd } : {}),
       }
       try {
         ws.send(JSON.stringify(frame))
@@ -223,6 +225,11 @@ export class ClaudegramClient {
         parsed = JSON.parse(raw)
       } catch {
         this.log.warn('claudegram_ws_malformed_frame', { raw: raw.slice(0, 200) })
+        return
+      }
+      // Respond to server-side heartbeat pings without routing to the reply handler.
+      if (typeof parsed === 'object' && parsed !== null && (parsed as Record<string, unknown>)['type'] === 'ping') {
+        try { ws.send(JSON.stringify({ type: 'pong' })) } catch { /* ignore */ }
         return
       }
       if (!isInboundReply(parsed)) {

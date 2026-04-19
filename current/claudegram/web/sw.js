@@ -1,4 +1,7 @@
-const VERSION = 'v1-mistral-status-bar';
+// Bump VERSION whenever any of the SHELL files change so the SW activates and
+// old caches get purged on first reload. Failing to bump makes users see stale
+// HTML/CSS/JS — the exact symptom behind "my UI changes didn't appear".
+const VERSION = 'v4-mobile-fix';
 const SHELL = [
   '/',
   '/web/style.css',
@@ -7,6 +10,7 @@ const SHELL = [
   '/web/js/ws.js',
   '/web/js/store.js',
   '/web/js/render.js',
+  '/web/js/markdown.js',
   '/web/js/notify.js',
   '/web/icons/icon-192.png',
   '/web/icons/icon-512.png',

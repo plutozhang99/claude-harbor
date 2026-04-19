@@ -45,6 +45,8 @@
 }
 
 html, body {
+  /* dvh tracks browser chrome (address bar) show/hide on mobile.
+     Fallback to 100% for non-supporting browsers (covered by html/body 100%). */
   height: 100%;
   background: var(--bg);
   color: var(--ink);
@@ -52,6 +54,18 @@ html, body {
   font-size: 16px;
   line-height: 1.5;
   font-weight: 400;
+  /* Prevent iOS double-tap zoom on buttons/links without disabling pinch zoom. */
+  touch-action: manipulation;
+}
+
+@supports (height: 100dvh) {
+  html, body { height: 100dvh; }
+}
+
+body {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
 }
 
 /* ── Accessibility ────────────────────────────────────────────── */
@@ -130,10 +144,6 @@ header {
 #fakechat-pill[data-state="partial"]    .status-value { background: var(--sunshine); color: var(--ink); }
 #fakechat-pill[data-state="all-offline"].status-value { background: var(--accent);   color: #fff; }
 
-/* Session pill — active conversation reachability */
-#session-pill[data-state="none"]    .status-value { background: var(--surface2); color: var(--ink-dim); }
-#session-pill[data-state="online"]  .status-value { background: var(--ink);      color: var(--yellow); }
-#session-pill[data-state="offline"] .status-value { background: var(--accent);   color: #fff; }
 
 .sidebar-toggle {
   display: none; background: transparent; border: 1px solid var(--ink);
@@ -148,7 +158,11 @@ header {
 .layout {
   display: grid;
   grid-template-columns: var(--sidebar-w) 1fr;
-  height: calc(100vh - 65px);
+  /* body is flex-column; fill remaining space after header. This replaces
+     the old height: calc(100vh - 65px) which hardcoded header height and
+     broke on mobile when the browser chrome toggled. */
+  flex: 1;
+  min-height: 0;
 }
 
 /* ── Sidebar ──────────────────────────────────────────────────── */
@@ -350,8 +364,110 @@ a.chip:hover { background: var(--surface2); text-decoration: underline; }
 .compose textarea::placeholder { color: var(--ink-dim); }
 
 .compose-row {
-  display: flex; justify-content: flex-end; gap: 0.5rem; align-items: center;
+  display: flex; justify-content: space-between; gap: 0.6rem; align-items: center;
+  flex-wrap: wrap;
 }
+
+/* ── Session-meta (compose-row left: session badge + statusline) ── */
+.session-meta {
+  display: flex; align-items: center;
+  gap: 0.6rem;
+  flex: 1 1 0; min-width: 0;
+  overflow: hidden;
+}
+
+.session-badge {
+  display: inline-flex; align-items: center;
+  gap: 0.35rem;
+  padding: 0.32em 0.6em 0.32em 0.45em;
+  border: 1px solid var(--ink);
+  border-radius: var(--radius-pill);
+  background: var(--surface);
+  color: var(--ink);
+  font-size: 0.7rem;
+  font-family: Arial, monospace;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  white-space: nowrap;
+  line-height: 1;
+  flex-shrink: 0;
+  max-width: 18ch;
+  cursor: default;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+
+.session-dot {
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: var(--border-warm);
+  transition: background 0.2s, box-shadow 0.2s;
+}
+
+.session-badge[data-connected="online"]              { background: var(--ink); color: var(--yellow); }
+.session-badge[data-connected="online"] .session-dot { background: var(--yellow); box-shadow: 0 0 4px rgba(255, 217, 0, 0.6); }
+
+.session-badge[data-connected="offline"]              { background: var(--surface); color: var(--ink-dim); }
+.session-badge[data-connected="offline"] .session-dot { background: var(--accent); }
+
+.session-badge[data-connected="unknown"]              { background: var(--surface2); color: var(--ink-dim); }
+.session-badge[data-connected="unknown"] .session-dot { background: var(--sunshine); }
+
+.session-badge[data-connected="none"]                 { border-color: var(--border-warm); color: var(--ink-dim); background: var(--surface); }
+.session-badge[data-connected="none"] .session-dot    { background: transparent; outline: 1.5px dashed var(--border-warm); outline-offset: -1px; }
+
+.session-badge-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 12ch;
+  font-weight: 500;
+}
+
+/* ── Statusline (Claude Code live context + rate-limit indicator) ── */
+.statusline {
+  display: flex; flex: 1 1 auto; min-width: 0;
+  align-items: center; gap: 0.5rem;
+  font-size: 0.72rem;
+  color: var(--ink-dim);
+  font-variant-numeric: tabular-nums;
+  overflow: hidden;
+}
+.statusline[data-state="empty"] { visibility: hidden; }
+
+.statusline .sl-model {
+  font-weight: 500;
+  color: var(--ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 14ch;
+  flex: 0 0 auto;
+}
+
+.statusline .sl-bar {
+  display: inline-flex; align-items: center; gap: 0.3rem;
+  flex: 0 0 auto;
+}
+.statusline .sl-bar-label { opacity: 0.7; }
+.statusline .sl-bar-track {
+  position: relative;
+  width: 4.5rem; height: 0.45rem;
+  background: var(--border-warm, #e6ddcf);
+  border-radius: 999px;
+  overflow: hidden;
+}
+.statusline .sl-bar-fill {
+  position: absolute; left: 0; top: 0; bottom: 0;
+  background: var(--accent, #fa520f);
+  border-radius: inherit;
+  transition: width 0.3s ease;
+}
+.statusline .sl-bar[data-state="ok"]   .sl-bar-fill { background: #3b8a4e; }
+.statusline .sl-bar[data-state="warn"] .sl-bar-fill { background: #c78b1d; }
+.statusline .sl-bar[data-state="crit"] .sl-bar-fill { background: #c84a2a; }
+.statusline .sl-bar-pct { min-width: 2.5ch; text-align: right; font-variant-numeric: tabular-nums; }
+.statusline .sl-bar--empty .sl-bar-track { opacity: 0.3; }
 
 .compose button[type="submit"] {
   background: var(--ink); color: #fff;
@@ -371,6 +487,18 @@ a.chip:hover { background: var(--surface2); text-decoration: underline; }
 
 /* ── Mobile (<= 640px) ────────────────────────────────────────── */
 @media (max-width: 640px) {
+  /* Tighter header at narrow widths; respect iOS top safe area. */
+  header {
+    padding: 0.6rem 0.85rem;
+    padding-top: max(0.6rem, env(safe-area-inset-top) + 0.35rem);
+    gap: 0.55rem;
+  }
+  .app-name { font-size: 1.25rem; }
+  .status-bar { gap: 0.3rem; }
+  .status-pill { font-size: 0.62rem; letter-spacing: 0.04em; }
+  .status-pill .status-label { padding: 0.3em 0.45em; }
+  .status-pill .status-value { padding: 0.3em 0.55em; }
+
   .layout { grid-template-columns: 1fr; position: relative; }
 
   aside {
@@ -380,12 +508,153 @@ a.chip:hover { background: var(--surface2); text-decoration: underline; }
     border-right: 1px solid var(--border-warm);
     box-shadow: var(--shadow-golden);
   }
-  aside.open { transform: translateX(0); }
+  /* JS toggles `.sidebar--open` on #sidebar; earlier CSS used a different
+     class name which left the mobile sidebar permanently hidden. */
+  aside.sidebar--open { transform: translateX(0); }
 
-  .sidebar-toggle { display: inline-flex; }
+  .sidebar-toggle { display: inline-flex; width: 2.25rem; height: 2.25rem; }
 
-  .messages { padding: 1rem 1rem; }
-  .messages li { max-width: 88%; }
+  /* Session list: rename/delete buttons visible by default on touch devices
+     (no :hover to reveal them) — shift the session name right to keep room. */
+  #session-list li { padding: 0.75rem 3.5rem 0.75rem 0.85rem; font-size: 0.9rem; }
+  .session-rename, .session-delete { opacity: 0.7; }
+
+  main { min-width: 0; }
+  .messages { padding: 0.9rem 0.85rem; gap: 0.85rem; }
+  .messages li { max-width: 92%; }
+  .msg-body { padding: 0.6rem 0.85rem; font-size: 0.92rem; }
+
+  /* Compose: tighter padding, respect iOS bottom safe area. */
+  .compose {
+    padding: 0.85rem 0.9rem 1rem;
+    padding-bottom: max(1rem, env(safe-area-inset-bottom) + 0.35rem);
+    gap: 0.55rem;
+  }
+  .compose textarea { min-height: 52px; padding: 0.6rem 0.75rem; }
+
+  /* Compose bottom strip: full-width meta row on mobile, send button below. */
+  .compose-row { gap: 0.45rem 0.6rem; }
+  .session-meta {
+    order: 1;
+    width: 100%; flex-basis: 100%;
+    gap: 0.45rem;
+    flex-wrap: wrap;
+  }
+  .session-badge { max-width: 60%; font-size: 0.66rem; padding: 0.3em 0.55em 0.3em 0.4em; }
+  .session-badge-name { max-width: 14ch; }
+  .statusline {
+    width: 100%; flex-basis: 100%;
+    font-size: 0.66rem;
+    gap: 0.35rem;
+    flex-wrap: wrap;
+  }
+  .statusline .sl-bar-track { width: 3.2rem; height: 0.4rem; }
+  .statusline .sl-model { max-width: 10ch; font-size: 0.72rem; }
+  .compose button[type="submit"] {
+    order: 2; margin-left: auto;
+    min-height: 2.5rem; padding: 0.55em 1.4em;
+  }
+}
+
+@media (max-width: 380px) {
+  header { padding: 0.55rem 0.7rem; }
+  .app-name { font-size: 1.1rem; }
+  .statusline .sl-bar-track { width: 2.6rem; }
+  .statusline .sl-bar-label { font-size: 0.62rem; }
+  .messages li { max-width: 95%; }
+  .session-badge { max-width: 70%; }
+}
+
+/* ── Markdown (assistant message bodies) ─────────────────────── */
+.msg-body .md-p {
+  margin: 0;
+}
+.msg-body .md-p + .md-p,
+.msg-body .md-p + .md-list,
+.msg-body .md-list + .md-p,
+.msg-body .md-list + .md-list,
+.msg-body .md-code + *,
+.msg-body * + .md-code,
+.msg-body .md-h + * {
+  margin-top: 0.5em;
+}
+.msg-body .md-h {
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  line-height: 1.25;
+}
+.msg-body .md-h1 { font-size: 1.1em; }
+.msg-body .md-h2 { font-size: 1.05em; }
+.msg-body .md-h3,
+.msg-body .md-h4,
+.msg-body .md-h5,
+.msg-body .md-h6 { font-size: 1em; }
+.msg-body .md-list {
+  margin: 0;
+  padding-left: 1.4em;
+}
+.msg-body .md-list li { margin: 0.1em 0; }
+.msg-body .md-inline-code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.92em;
+  background: rgba(31, 31, 31, 0.08);
+  padding: 0.08em 0.35em;
+  border-radius: 3px;
+}
+.msg-body .md-code {
+  margin: 0;
+  padding: 0.6em 0.75em;
+  background: rgba(31, 31, 31, 0.06);
+  border: 1px solid var(--border-warm);
+  border-radius: 4px;
+  overflow-x: auto;
+  font-size: 0.88em;
+  line-height: 1.45;
+}
+.msg-body .md-code code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  white-space: pre;
+}
+.msg-body .md-link {
+  color: var(--accent);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.msg-body .md-link:hover { color: var(--accent-hot); }
+
+/* User-bubble overrides (dark background needs lighter code/link colours) */
+.messages li[data-from="user"] .md-inline-code,
+.messages li[data-from="user"] .md-code {
+  background: rgba(255, 255, 255, 0.12);
+  border-color: rgba(255, 255, 255, 0.15);
+  color: var(--user-text);
+}
+.messages li[data-from="user"] .md-link { color: var(--sunshine); }
+
+/* ── "Claude is thinking" indicator ──────────────────────────── */
+.msg-waiting {
+  opacity: 0.85;
+}
+.typing-dots {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3em;
+  height: 1em;
+}
+.typing-dots .dot {
+  width: 0.42em;
+  height: 0.42em;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: 0.35;
+  animation: typing-bounce 1.15s infinite ease-in-out;
+}
+.typing-dots .dot:nth-child(2) { animation-delay: 0.15s; }
+.typing-dots .dot:nth-child(3) { animation-delay: 0.3s; }
+
+@keyframes typing-bounce {
+  0%, 60%, 100% { transform: translateY(0);     opacity: 0.3; }
+  30%            { transform: translateY(-0.3em); opacity: 0.9; }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -393,4 +662,5 @@ a.chip:hover { background: var(--surface2); text-decoration: underline; }
     transition: none !important;
     animation: none !important;
   }
+  .typing-dots .dot { opacity: 0.6; }
 }

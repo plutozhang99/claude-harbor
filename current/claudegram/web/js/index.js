@@ -28,6 +28,33 @@ ws.on('session_deleted', ({ session_id }) => {
   store.applySessionDeleted(session_id);
 });
 
+ws.on('statusline', ({ session_id, statusline }) => {
+  store.applyStatusline(session_id, statusline);
+});
+
+// On (re)connect, advance the read pointer for the active session. Handles
+// the boot case where mark_read fires before the WS is open, and the
+// reconnect case where the server may have missed an earlier send.
+ws.on('connect', () => {
+  if (store.state.activeId !== null) {
+    maybeMarkRead(store.state.activeId);
+  }
+});
+
+// When a live assistant message arrives for the active session, immediately
+// advance the server-side read pointer so a later refresh doesn't resurrect
+// the unread count. Only fires for messages the user is actually looking at.
+ws.on('message', ({ session_id, message }) => {
+  if (
+    session_id === store.state.activeId &&
+    message &&
+    message.direction !== 'user' &&
+    typeof message.id === 'string'
+  ) {
+    ws.send({ type: 'mark_read', session_id, up_to_message_id: message.id });
+  }
+});
+
 ws.on('error', (frame) => {
   // Server-side rejection of a frame we sent. Mark the pending optimistic
   // echo as failed; the renderer shows it inline.
@@ -37,9 +64,10 @@ ws.on('error', (frame) => {
   }
 });
 
-// ── Header status pills ───────────────────────────────────────────
+// ── Header status pills + compose-row session badge ───────────────
 // system-pill is driven by ws.js itself (open/closed/connecting).
-// fakechat-pill + session-pill react to store changes.
+// fakechat-pill reacts to store changes (aggregate of all sessions).
+// The per-session online indicator lives in the compose-row session-badge.
 function updateStatusPills() {
   // Fakechat pill: count online vs total. connected:true is set by /api/sessions
   // and updated live via session_update broadcasts (P2-hotfix2).
@@ -59,21 +87,25 @@ function updateStatusPills() {
     fakechatPill.setAttribute('data-state', state);
   }
 
-  // Session pill: reflect the active session's connected state.
-  const sessionPill = document.getElementById('session-pill');
-  if (sessionPill) {
-    const valueEl = sessionPill.querySelector('.status-value');
+  // Compose-row session badge: active session's name + connection state.
+  const sessionBadge = document.getElementById('session-badge');
+  const sessionBadgeName = document.getElementById('session-badge-name');
+  if (sessionBadge && sessionBadgeName) {
     const activeId = store.state.activeId;
-    let state = 'none';
-    let label = 'none';
-    if (activeId !== null) {
+    if (activeId === null) {
+      sessionBadge.setAttribute('data-connected', 'none');
+      sessionBadge.title = 'No active session';
+      sessionBadgeName.textContent = 'no session';
+    } else {
       const active = store.state.sessions.get(activeId);
-      if (active && active.connected === true)       { state = 'online';  label = 'online'; }
-      else if (active && active.connected === false) { state = 'offline'; label = 'offline'; }
-      else                                            { state = 'offline'; label = 'unknown'; } // missing field → conservative
+      const name = active?.name ?? activeId;
+      let connState = 'unknown';
+      if (active?.connected === true) connState = 'online';
+      else if (active?.connected === false) connState = 'offline';
+      sessionBadge.setAttribute('data-connected', connState);
+      sessionBadge.title = `${name} — ${connState}`;
+      sessionBadgeName.textContent = name;
     }
-    if (valueEl) valueEl.textContent = label;
-    sessionPill.setAttribute('data-state', state);
   }
 }
 
@@ -182,6 +214,25 @@ document.getElementById('sidebar-toggle')?.addEventListener('click', toggleSideb
 async function onSelectSession(id) {
   store.setActive(id);
   await store.hydrateMessages(id, fetchMessages);
+  // After hydration, advance the server-side read pointer to the latest
+  // message so that refreshing the page doesn't resurrect the unread count.
+  maybeMarkRead(id);
+}
+
+/**
+ * Send a mark_read frame for the latest assistant message in a session,
+ * if the session is hydrated and has any assistant messages.
+ * @param {string} sessionId
+ */
+function maybeMarkRead(sessionId) {
+  const messages = store.state.messagesBySession.get(sessionId);
+  if (!messages || messages.length === 0) return;
+  // Walk backwards to the most recent message regardless of direction —
+  // the server's monotonic MAX(last_read_at, ts) guarantees this is safe
+  // even if the last message is a user message.
+  const last = messages[messages.length - 1];
+  if (!last || typeof last.id !== 'string') return;
+  ws.send({ type: 'mark_read', session_id: sessionId, up_to_message_id: last.id });
 }
 
 /**

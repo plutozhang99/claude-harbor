@@ -13,6 +13,7 @@ import {
   CallToolRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js'
 import { readFileSync, writeFileSync, mkdirSync, statSync, copyFileSync } from 'fs'
+import { createHash } from 'crypto'
 import { homedir } from 'os'
 import { join, extname, basename } from 'path'
 import type { ServerWebSocket } from 'bun'
@@ -27,8 +28,28 @@ const CLAUDEGRAM_SERVICE_TOKEN_SECRET = process.env.CLAUDEGRAM_SERVICE_TOKEN_SEC
 
 // ---------------------------------------------------------------------------
 // Phase 4.0 — Scope STATE_DIR per session
+//
+// Priority order for the scope (= STATE_DIR basename):
+//   1. $CLAUDE_SESSION_ID        — explicit user-set identifier (stable)
+//   2. `cwd-<sha256(cwd)[0..15]>` — default; stable per project directory
+//   3. `pid-${pid}`              — fallback only if cwd is unreadable
+//
+// Why cwd over pid: Claude Code spawns fakechat with a fresh pid on every
+// restart, so the pid scope created a new ULID (and a new claudegram session
+// row) each time. Ghost sessions piled up. cwd-hashed scope means one
+// project = one stable ULID across Claude Code restarts.
 // ---------------------------------------------------------------------------
-const SESSION_SCOPE = process.env.CLAUDE_SESSION_ID ?? `pid-${process.pid}`
+function cwdSlug(cwd: string): string {
+  return createHash('sha256').update(cwd).digest('hex').slice(0, 16)
+}
+function defaultSessionScope(): string {
+  try {
+    return `cwd-${cwdSlug(process.cwd())}`
+  } catch {
+    return `pid-${process.pid}`
+  }
+}
+const SESSION_SCOPE = process.env.CLAUDE_SESSION_ID ?? defaultSessionScope()
 const STATE_DIR = join(homedir(), '.claude', 'channels', 'fakechat', SESSION_SCOPE)
 const INBOX_DIR = join(STATE_DIR, 'inbox')
 const OUTBOX_DIR = join(STATE_DIR, 'outbox')
@@ -105,6 +126,7 @@ const client: ClaudegramClient | null = CLAUDEGRAM_URL
       serviceTokenId: CLAUDEGRAM_SERVICE_TOKEN_ID || undefined,
       serviceTokenSecret: CLAUDEGRAM_SERVICE_TOKEN_SECRET || undefined,
       sessionId: SESSION_ID,
+      cwd: process.cwd(),
     })
   : null
 
@@ -365,6 +387,7 @@ mcp.setRequestHandler(CallToolRequestSchema, async req => {
   try {
     switch (req.params.name) {
       case 'reply': {
+        ensureClientStarted()
         const text = args.text as string
         const replyTo = args.reply_to as string | undefined
         const files = (args.files as string[] | undefined) ?? []
@@ -421,16 +444,39 @@ mcp.setRequestHandler(CallToolRequestSchema, async req => {
 await mcp.connect(new StdioServerTransport())
 
 // ---------------------------------------------------------------------------
-// P2.4 — Wire ClaudegramClient: start reverse WS dial + register reply handler.
-// The client is null when CLAUDEGRAM_URL is unset (upstream-identical behavior).
+// P2.4 — Wire ClaudegramClient: lazy start on first interaction.
+//
+// We do NOT call client.start() eagerly at startup. Without
+// --channels plugin:fakechat@claude-plugins-official, fakechat's MCP server
+// still starts (it's in .mcp.json), so an eager start would register a
+// claudegram session even when channels are inactive. Lazy start means the
+// session only appears in claudegram when the user actually sends a message
+// or Claude Code calls the reply tool — i.e., only when channels are in use.
 // ---------------------------------------------------------------------------
-if (client !== null) {
-  client.onReply(reply => {
-    // Inbound reply from claudegram PWA → deliver to MCP as a user-direction message.
-    // Pass _origin:'pwa' so deliver() skips the outbound /ingest POST (echo-dedup).
-    deliver(reply.client_msg_id, reply.text, undefined, 'pwa')
-  })
-  client.start()
+let clientStarted = false
+
+function ensureClientStarted(): void {
+  if (clientStarted || client === null) return
+  // Set the flag only after both onReply() and start() complete without
+  // throwing — otherwise a synchronous throw in start() would permanently
+  // disable retry and silently break all future interactions.
+  try {
+    client.onReply(reply => {
+      deliver(reply.client_msg_id, reply.text, undefined, 'pwa')
+    })
+    client.start()
+    clientStarted = true
+  } catch (err) {
+    process.stderr.write(
+      JSON.stringify({
+        ts: new Date().toISOString(),
+        level: 'error',
+        msg: 'ensureClientStarted_failed',
+        err: err instanceof Error ? err.message : String(err),
+      }) + '\n',
+    )
+    // Flag stays false so the next interaction can retry.
+  }
 }
 
 function deliver(
@@ -439,6 +485,10 @@ function deliver(
   file?: { path: string; name: string },
   origin?: 'pwa',
 ): void {
+  // Lazily start the claudegram client on first real interaction so that
+  // sessions only appear when channels are actually in use.
+  if (origin !== 'pwa') ensureClientStarted()
+
   // file_path goes in meta only — an in-content "[attached — Read: PATH]"
   // annotation is forgeable by typing that string into the UI.
   void mcp.notification({

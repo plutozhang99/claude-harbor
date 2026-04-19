@@ -4,7 +4,7 @@ import type { SessionRegistry } from '../ws/session-registry.js';
 import type { Hub } from '../ws/hub.js';
 import type { MessageRepo, SessionRepo, Message, Session } from '../repo/types.js';
 import type { Logger } from '../logger.js';
-import { handleUserSocketMessage, type UserSocketDeps } from './user-socket.js';
+import { handleUserSocketMessage, handleUserSocketOpen, type UserSocketDeps } from './user-socket.js';
 
 // ── Mock factories ────────────────────────────────────────────────────────────
 
@@ -535,6 +535,79 @@ describe('handleUserSocketMessage — FIX 5: persist + broadcast on reply', () =
     // Warning was logged
     expect((logger.warn as ReturnType<typeof mock>).mock.calls.some(
       (c) => (c[0] as string) === 'user_socket_reply_insert_failed',
+    )).toBe(true);
+  });
+});
+
+describe('handleUserSocketOpen (state sync on PWA connect)', () => {
+  it('sends one session_update frame per DB session with connected state from registry', () => {
+    const ws = makeMockWs();
+    const sessions: Session[] = [
+      { id: 'a', name: 'A', first_seen_at: 1, last_seen_at: 2, status: 'active', last_read_at: 0 },
+      { id: 'b', name: 'B', first_seen_at: 3, last_seen_at: 4, status: 'active', last_read_at: 0 },
+      { id: 'c', name: 'C', first_seen_at: 5, last_seen_at: 6, status: 'active', last_read_at: 0 },
+    ];
+    const connectedSet = new Set(['a', 'c']);
+    const logger = makeLogger();
+
+    handleUserSocketOpen(ws, {
+      sessionRepo: {
+        findAll: () => sessions,
+      } as unknown as SessionRepo,
+      sessionRegistry: {
+        has: (id: string) => connectedSet.has(id),
+      },
+      logger,
+    });
+
+    expect(ws.sentMessages).toHaveLength(3);
+    const parsed = ws.sentMessages.map((s) => JSON.parse(s));
+    expect(parsed[0]).toEqual({ type: 'session_update', session: { ...sessions[0], connected: true } });
+    expect(parsed[1]).toEqual({ type: 'session_update', session: { ...sessions[1], connected: false } });
+    expect(parsed[2]).toEqual({ type: 'session_update', session: { ...sessions[2], connected: true } });
+  });
+
+  it('empty DB → sends nothing, no throw', () => {
+    const ws = makeMockWs();
+    expect(() => handleUserSocketOpen(ws, {
+      sessionRepo: { findAll: () => [] } as unknown as SessionRepo,
+      sessionRegistry: { has: () => false },
+      logger: makeLogger(),
+    })).not.toThrow();
+    expect(ws.sentMessages).toHaveLength(0);
+  });
+
+  it('sessionRepo.findAll throws → warn-logged and returns without throwing', () => {
+    const ws = makeMockWs();
+    const logger = makeLogger();
+    expect(() => handleUserSocketOpen(ws, {
+      sessionRepo: { findAll: () => { throw new Error('DB down'); } } as unknown as SessionRepo,
+      sessionRegistry: { has: () => false },
+      logger,
+    })).not.toThrow();
+    expect(ws.sentMessages).toHaveLength(0);
+    expect((logger.warn as ReturnType<typeof mock>).mock.calls.some(
+      (c) => (c[0] as string) === 'user_socket_open_state_sync_failed',
+    )).toBe(true);
+  });
+
+  it('ws.send throws on first frame → aborts loop and logs (dead socket)', () => {
+    const sessions: Session[] = [
+      { id: 'a', name: 'A', first_seen_at: 1, last_seen_at: 2, status: 'active', last_read_at: 0 },
+      { id: 'b', name: 'B', first_seen_at: 3, last_seen_at: 4, status: 'active', last_read_at: 0 },
+    ];
+    const ws = makeMockWs();
+    // Override send to throw
+    (ws as unknown as { send: (text: string) => void }).send = mock(() => { throw new Error('socket dead'); });
+    const logger = makeLogger();
+
+    expect(() => handleUserSocketOpen(ws, {
+      sessionRepo: { findAll: () => sessions } as unknown as SessionRepo,
+      sessionRegistry: { has: () => false },
+      logger,
+    })).not.toThrow();
+    expect((logger.warn as ReturnType<typeof mock>).mock.calls.some(
+      (c) => (c[0] as string) === 'user_socket_open_sync_send_failed',
     )).toBe(true);
   });
 });

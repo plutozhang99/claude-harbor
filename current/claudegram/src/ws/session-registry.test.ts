@@ -423,3 +423,35 @@ describe('InMemorySessionRegistry.has()', () => {
     expect(registry.has('sess-2')).toBe(false);
   });
 });
+
+describe('closeBySession', () => {
+  it('closes the WS with given code+reason and removes from registry', () => {
+    const closed: { code: number; reason: string }[] = [];
+    const ws = makeStubWs({ onClose: (c, r) => closed.push({ code: c, reason: r }) });
+    const registry = new InMemorySessionRegistry();
+    registry.register('sess-1', ws);
+
+    registry.closeBySession('sess-1', 1000, 'session_deleted');
+
+    expect(registry.has('sess-1')).toBe(false);
+    expect(registry.size).toBe(0);
+    expect(closed).toEqual([{ code: 1000, reason: 'session_deleted' }]);
+  });
+
+  it('no-op for unknown session_id', () => {
+    const registry = new InMemorySessionRegistry();
+    expect(() => registry.closeBySession('ghost', 1000, 'gone')).not.toThrow();
+  });
+
+  it('subsequent disposable [Symbol.dispose] is a no-op (map already cleared)', () => {
+    const registry = new InMemorySessionRegistry();
+    const ws = makeStubWs();
+    const disposable = registry.register('sess-1', ws);
+
+    registry.closeBySession('sess-1', 1000, 'session_deleted');
+    // Disposable fires (simulating the close event path) — must not throw or re-add to map.
+    expect(() => disposable[Symbol.dispose]()).not.toThrow();
+    expect(registry.has('sess-1')).toBe(false);
+    expect(registry.size).toBe(0);
+  });
+});

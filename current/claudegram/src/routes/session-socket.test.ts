@@ -103,6 +103,7 @@ function makeSessionRegistry(overrides: Partial<SessionRegistry> = {}): SessionR
       };
     },
     unregister: (_id: string) => { _size = Math.max(0, _size - 1); _registered.delete(_id); },
+    closeBySession: (_id: string) => { _size = Math.max(0, _size - 1); _registered.delete(_id); },
     send: (_id: string, _payload: Parameters<SessionRegistry['send']>[1]): RegistrySendResult => ({ ok: true }),
     has: (_id: string) => _registered.has(_id),
     get size() { return _size; },
@@ -402,6 +403,40 @@ describe('handleSessionSocketMessage — register', () => {
     expect(sent).toHaveLength(0);
     expect(tryRegisterCalls).toHaveLength(0);
     expect(debugCalls).toContain('session_socket_unknown_frame');
+  });
+
+  it('pong frame → no broadcast / no upsert / no error frame / no bad-frame bump', () => {
+    const sent: string[] = [];
+    const broadcasts: BroadcastPayload[] = [];
+    const upsertCalls: string[] = [];
+    const tryRegisterCalls: string[] = [];
+
+    const ws = makeStubWs({ onSend: (d) => sent.push(d) });
+    const sessRepo = makeSessionRepo({
+      upsert: (s) => { upsertCalls.push(s.id); },
+    });
+    const sessionRegistry = makeSessionRegistry({
+      tryRegister: (id, _ws) => { tryRegisterCalls.push(id); return { ok: true as const, disposable: { [Symbol.dispose]: () => {} } }; },
+    });
+    const hub = makeHub(broadcasts);
+
+    const deps = {
+      config: makeConfig(),
+      sessRepo,
+      sessionRegistry,
+      hub,
+      logger: noopLogger,
+    };
+
+    handleSessionSocketOpen(ws, deps);
+    // A pong frame lands before any register frame — must be silently accepted
+    // as a heartbeat response and NOT routed to session-upsert / registry.
+    handleSessionSocketMessage(ws, JSON.stringify({ type: 'pong' }), deps);
+
+    expect(sent).toHaveLength(0);
+    expect(upsertCalls).toHaveLength(0);
+    expect(tryRegisterCalls).toHaveLength(0);
+    expect(broadcasts).toHaveLength(0);
   });
 
   // HIGH 3 test: upsert throws → error frame carries reason: 'internal_error'

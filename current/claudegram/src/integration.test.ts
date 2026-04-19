@@ -179,6 +179,8 @@ describe('WebSocket E2E integration', () => {
   it("second WS client also receives broadcasts (fan-out)", async () => {
     const ws1 = await openWs(srv.port);
     const ws2 = await openWs(srv.port);
+    // Let state-sync frames drain before we start collecting ingest-triggered events.
+    await new Promise<void>((r) => setTimeout(r, 50));
 
     try {
       const c1 = collectMessages(ws1, 2, 2000);
@@ -212,6 +214,8 @@ describe('WebSocket E2E integration', () => {
 
   it("ingested_at in the broadcast message is a plausible recent timestamp", async () => {
     const ws = await openWs(srv.port);
+    // Let state-sync frames drain before we start collecting ingest-triggered events.
+    await new Promise<void>((r) => setTimeout(r, 50));
 
     try {
       const collector = collectMessages(ws, 2, 2000);

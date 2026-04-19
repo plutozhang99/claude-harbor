@@ -255,6 +255,51 @@ export function handleUserSocketMessage(
   }
 }
 
+// ── Public: open handler ──────────────────────────────────────────────────────
+
+export interface UserSocketOpenDeps {
+  readonly sessionRepo: SessionRepo;
+  readonly sessionRegistry: Pick<SessionRegistry, 'has'>;
+  readonly logger: Logger;
+}
+
+/**
+ * Send a full session state snapshot to a newly connected PWA socket.
+ * This replaces any stale connected/disconnected state the client may have
+ * from a prior server session without a clean disconnect broadcast.
+ */
+export function handleUserSocketOpen(
+  ws: ServerWebSocket<unknown>,
+  deps: UserSocketOpenDeps,
+): void {
+  const { sessionRepo, sessionRegistry, logger } = deps;
+  let sessions: ReturnType<SessionRepo['findAll']>;
+  try {
+    sessions = sessionRepo.findAll();
+  } catch (err) {
+    logger.warn('user_socket_open_state_sync_failed', {
+      err: err instanceof Error ? err.message : String(err),
+    });
+    return;
+  }
+
+  for (const session of sessions) {
+    const frame = JSON.stringify({
+      type: 'session_update',
+      session: { ...session, connected: sessionRegistry.has(session.id) },
+    });
+    try {
+      ws.send(frame);
+    } catch (err) {
+      logger.warn('user_socket_open_sync_send_failed', {
+        session_id: session.id,
+        err: err instanceof Error ? err.message : String(err),
+      });
+      return; // WS is dead; stop trying.
+    }
+  }
+}
+
 // ── Public: close handler ─────────────────────────────────────────────────────
 
 /**

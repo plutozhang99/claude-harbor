@@ -66,6 +66,13 @@ export interface SessionRegistry {
   /** Remove the registration for `session_id` (no-op if not registered). */
   unregister(session_id: string): void;
 
+  /**
+   * Close the WebSocket for `session_id` and remove it from the registry.
+   * No-op if not registered. Removes from map FIRST, then calls ws.close()
+   * so the subsequent close-event disposable path is a no-op (map already empty).
+   */
+  closeBySession(session_id: string, code?: number, reason?: string): void;
+
   /** Returns true if a socket is currently registered for session_id. */
   has(session_id: string): boolean;
 
@@ -176,6 +183,20 @@ export class InMemorySessionRegistry implements SessionRegistry {
 
   unregister(session_id: string): void {
     this.sockets.delete(session_id);
+  }
+
+  closeBySession(session_id: string, code = 1000, reason = ''): void {
+    const ws = this.sockets.get(session_id);
+    if (ws === undefined) return;
+    this.sockets.delete(session_id);
+    try {
+      ws.close(code, reason);
+    } catch (err) {
+      this.warn('session_registry_close_by_session_failed', {
+        session_id,
+        err: err instanceof Error ? err.message : String(err),
+      });
+    }
   }
 
   has(session_id: string): boolean {

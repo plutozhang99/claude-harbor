@@ -27,6 +27,7 @@ function makeRegistry(connected: Record<string, boolean> = {}): SessionRegistry 
     tryRegister: mock(() => ({ ok: true as const, disposable: { [Symbol.dispose]: () => {} } })),
     send: mock(() => ({ ok: true as const })),
     unregister: mock(() => {}),
+    closeBySession: mock(() => {}),
     has: (id: string) => connected[id] === true,
     get size() { return Object.values(connected).filter(Boolean).length; },
   };
@@ -215,6 +216,7 @@ function makeDeleteDeps(overrides: {
     tryRegister: mock(() => ({ ok: true as const, disposable: { [Symbol.dispose]: () => {} } })),
     send: mock(() => ({ ok: true as const })),
     unregister: mock(() => {}),
+    closeBySession: mock(() => {}),
     has: overrides.has ?? (() => false),
     get size() { return 0; },
   };
@@ -269,6 +271,16 @@ describe('handleApiSessionDelete', () => {
     const req = new Request('http://localhost/api/sessions/sess-del', { method: 'GET' });
     const res = await handleApiSessionDelete(req, 'sess-del', deps);
     expect(res.status).toBe(405);
+  });
+
+  it('DELETE → closeBySession invoked with (id, 1000, "session_deleted")', async () => {
+    const deps = makeDeleteDeps();
+    const closeBy = deps.sessionRegistry.closeBySession as ReturnType<typeof mock>;
+    const req = new Request('http://localhost/api/sessions/sess-del', { method: 'DELETE' });
+    await handleApiSessionDelete(req, 'sess-del', deps);
+
+    expect(closeBy).toHaveBeenCalledTimes(1);
+    expect(closeBy.mock.calls[0]).toEqual(['sess-del', 1000, 'session_deleted']);
   });
 });
 

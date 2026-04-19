@@ -120,14 +120,10 @@ export async function handleApiSessionDelete(
       return jsonResponse(404, NOT_FOUND);
     }
 
-    // Close any live WS for this session (best-effort).
-    // The session-socket's close handler will fire and call dispose; nothing to do here.
-    // We do this by unregistering — but we don't have the WS to close it gracefully.
-    // The registry's unregister removes the entry; the WS stays open until the client disconnects.
-    // For now: just unregister so future sends fail fast.
-    if (deps.sessionRegistry.has(id)) {
-      deps.sessionRegistry.unregister(id);
-    }
+    // Close and unregister any live WS for this session. closeBySession removes
+    // from the map before calling ws.close() so the subsequent close-event
+    // disposable path is a no-op (idempotent).
+    deps.sessionRegistry.closeBySession(id, 1000, 'session_deleted');
 
     // Delete messages first (FK constraint: messages.session_id → sessions.id).
     deps.msgRepo.deleteBySession(id);

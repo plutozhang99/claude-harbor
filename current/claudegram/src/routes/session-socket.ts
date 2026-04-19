@@ -7,7 +7,11 @@ import type { Logger } from '../logger.js';
 import type { Config } from '../config.js';
 import type { SessionRepo } from '../repo/types.js';
 import type { SessionRegistry } from '../ws/session-registry.js';
+import { InMemoryCwdRegistry, type CwdRegistry } from '../ws/cwd-registry.js';
 import type { Hub } from '../ws/hub.js';
+
+/** Shared fallback used when test harnesses omit `cwdRegistry`. */
+const NOOP_CWD_REGISTRY: CwdRegistry = new InMemoryCwdRegistry();
 import {
   sendWithBackpressure as _sendWithBackpressure,
   sendErrorFrame as _sendErrorFrame,
@@ -28,13 +32,12 @@ const registerFrameSchema = z.object({
   type: z.literal('register'),
   session_id: z.string().min(1),
   session_name: z.string().min(1).optional(),
+  cwd: z.string().min(1).optional(),
 });
 
-/**
- * Discriminated union of all inbound session-socket frame schemas.
- * P2.3 will add `reply` / `mark_read` arms here as a one-line change.
- */
-const inboundFrameSchema = z.discriminatedUnion('type', [registerFrameSchema]);
+const pongFrameSchema = z.object({ type: z.literal('pong') });
+
+const inboundFrameSchema = z.discriminatedUnion('type', [registerFrameSchema, pongFrameSchema]);
 
 type RegisterFrame = z.infer<typeof registerFrameSchema>;
 
@@ -84,6 +87,11 @@ export interface SessionSocketDeps {
   readonly config: Config;
   readonly sessRepo: SessionRepo;
   readonly sessionRegistry: SessionRegistry;
+  /**
+   * Optional to keep the many existing test harnesses backward-compatible.
+   * `createServer` always supplies one at runtime; tests may omit it.
+   */
+  readonly cwdRegistry?: CwdRegistry;
   readonly hub: Hub;
   readonly logger: Logger;
 }
@@ -93,6 +101,15 @@ const wsState = new WeakMap<ServerWebSocket<unknown>, { session_id: string; disp
 
 /** Consecutive bad-frame counter per socket (for future N-strike close policy). */
 const badFrameCount = new WeakMap<ServerWebSocket<unknown>, number>();
+
+/** App-level ping state: interval timer and last-pong timestamp. */
+const pingState = new WeakMap<ServerWebSocket<unknown>, {
+  interval: ReturnType<typeof setInterval>;
+  lastPong: number;
+}>();
+
+const PING_INTERVAL_MS = 20_000;
+const PING_TIMEOUT_MS = 45_000;
 
 function sendErrorFrame(
   ws: ServerWebSocket<unknown>,
@@ -110,9 +127,36 @@ function sendErrorFrame(
 
 export function handleSessionSocketOpen(
   ws: ServerWebSocket<unknown>,
-  _deps: Pick<SessionSocketDeps, 'logger'>,
+  deps: SessionSocketDeps,
 ): void {
   badFrameCount.set(ws, 0);
+
+  const state = { interval: null as unknown as ReturnType<typeof setInterval>, lastPong: Date.now() };
+  const interval = setInterval(() => {
+    // If the WS already closed cleanly, cancel and bail.
+    if (!pingState.has(ws)) { clearInterval(interval); return; }
+
+    const last = pingState.get(ws)!.lastPong;
+    if (Date.now() - last > PING_TIMEOUT_MS) {
+      clearInterval(interval);
+      pingState.delete(ws);
+      // Synthesise cleanup as if the close event fired, then force-close.
+      // Wrap in try/catch so a broadcast/dispose throw inside close-cleanup
+      // cannot leak the registry slot or propagate out of the timer callback.
+      try { handleSessionSocketClose(ws, deps); } catch (err) {
+        deps.logger.warn('session_socket_heartbeat_cleanup_failed', {
+          err: err instanceof Error ? err.message : String(err),
+        });
+      }
+      try { ws.close(1001, 'ping timeout'); } catch { /* already closing */ }
+      return;
+    }
+
+    try { ws.send(JSON.stringify({ type: 'ping' })); } catch { /* ignore send errors */ }
+  }, PING_INTERVAL_MS);
+
+  state.interval = interval;
+  pingState.set(ws, state);
 }
 
 export function handleSessionSocketMessage(
@@ -121,6 +165,7 @@ export function handleSessionSocketMessage(
   deps: SessionSocketDeps,
 ): void {
   const { config, sessRepo, sessionRegistry, hub, logger } = deps;
+  const cwdRegistry = deps.cwdRegistry ?? NOOP_CWD_REGISTRY;
   const capBytes = config.wsOutboundBufferCapBytes;
 
   let parsed: unknown;
@@ -138,7 +183,8 @@ export function handleSessionSocketMessage(
     const frame = parsed as Record<string, unknown>;
     const frameType = frame['type'];
     // Zod discriminatedUnion will fail on unknown discriminant — treat as unknown frame.
-    const isUnknownType = !['register'].includes(String(frameType));
+    // Keep this allowlist in sync with inboundFrameSchema's discriminator literals.
+    const isUnknownType = !['register', 'pong'].includes(String(frameType));
     if (isUnknownType) {
       // Reserved for later phases — drop with a debug log.
       logger.debug('session_socket_unknown_frame', { type: String(frameType) });
@@ -152,8 +198,15 @@ export function handleSessionSocketMessage(
     return;
   }
 
+  // Pong frames update heartbeat timestamp and are not routed to session logic.
+  if (validation.data.type === 'pong') {
+    const ps = pingState.get(ws);
+    if (ps !== undefined) ps.lastPong = Date.now();
+    return;
+  }
+
   const msg: RegisterFrame = validation.data;
-  const { session_id, session_name } = msg;
+  const { session_id, session_name, cwd } = msg;
   const now = Date.now();
 
   // Upsert the session in the database.
@@ -190,7 +243,14 @@ export function handleSessionSocketMessage(
   wsState.set(ws, { session_id, disposable });
   badFrameCount.set(ws, 0);
 
-  logger.info('session_socket_registered', { session_id });
+  // Record cwd → session_id mapping so /internal/statusline POSTs from
+  // Claude Code (which know cwd but not our session_id) can be routed to
+  // the right PWA session. See CwdRegistry for lifetime details.
+  if (cwd !== undefined) {
+    cwdRegistry.set(cwd, session_id);
+  }
+
+  logger.info('session_socket_registered', { session_id, cwd });
 
   // FIX 2/3: Broadcast connected:true so all PWAs see the session come online.
   try {
@@ -208,10 +268,18 @@ export function handleSessionSocketMessage(
 
 export function handleSessionSocketClose(
   ws: ServerWebSocket<unknown>,
-  deps: Pick<SessionSocketDeps, 'sessionRegistry' | 'hub' | 'sessRepo' | 'logger'>,
+  deps: Pick<SessionSocketDeps, 'sessionRegistry' | 'cwdRegistry' | 'hub' | 'sessRepo' | 'logger'>,
 ): void {
   const { hub, sessRepo, logger } = deps;
+  const cwdRegistry = deps.cwdRegistry ?? NOOP_CWD_REGISTRY;
   const state = wsState.get(ws);
+
+  // Cancel heartbeat timer regardless of whether a register frame arrived.
+  const ps = pingState.get(ws);
+  if (ps !== undefined) {
+    clearInterval(ps.interval);
+    pingState.delete(ws);
+  }
 
   try {
     if (state !== undefined) {
@@ -224,6 +292,9 @@ export function handleSessionSocketClose(
           err: err instanceof Error ? err.message : String(err),
         });
       }
+      // Drop any cwd → session_id mapping pointing at this session.
+      cwdRegistry.clearBySession(state.session_id);
+
       logger.info('session_socket_closed', { session_id: state.session_id });
 
       // FIX 4: Broadcast connected:false so all PWAs see the session go offline.

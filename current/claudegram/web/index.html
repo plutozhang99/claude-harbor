@@ -24,10 +24,6 @@
         <span class="status-label">fakechat</span>
         <span class="status-value">0/0</span>
       </span>
-      <span class="status-pill" id="session-pill" data-state="none" title="active conversation status">
-        <span class="status-label">session</span>
-        <span class="status-value">none</span>
-      </span>
     </div>
   </header>
 
@@ -52,6 +48,13 @@
           autocomplete="off"
         ></textarea>
         <div class="compose-row">
+          <div class="session-meta" id="session-meta" aria-live="polite" aria-label="Session status and Claude Code metrics">
+            <span class="session-badge" id="session-badge" data-connected="none" title="No active session">
+              <span class="session-dot" aria-hidden="true"></span>
+              <span class="session-badge-name" id="session-badge-name">no session</span>
+            </span>
+            <div class="statusline" id="statusline" aria-label="Claude Code statusline"></div>
+          </div>
           <button type="submit" id="send-btn" disabled aria-label="Send message">Send</button>
         </div>
       </form>

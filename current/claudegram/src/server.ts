@@ -10,6 +10,8 @@ import type { Hub } from './ws/hub.js';
 import type { UserSocketData } from './ws/hub.js';
 import { InMemorySessionRegistry } from './ws/session-registry.js';
 import type { SessionRegistry } from './ws/session-registry.js';
+import { InMemoryCwdRegistry } from './ws/cwd-registry.js';
+import type { CwdRegistry } from './ws/cwd-registry.js';
 import type { SessionSocketData } from './routes/session-socket.js';
 import {
   checkSessionSocketAuth,
@@ -18,6 +20,7 @@ import {
   handleSessionSocketClose,
 } from './routes/session-socket.js';
 import {
+  handleUserSocketOpen,
   handleUserSocketMessage,
   handleUserSocketClose,
   type UserSocketDeps,
@@ -31,6 +34,8 @@ export interface ServerDeps {
   readonly hub?: Hub;
   /** Optional session registry — defaults to a new InMemorySessionRegistry. Pass your own for testing. */
   readonly sessionRegistry?: SessionRegistry;
+  /** Optional cwd registry — defaults to a new InMemoryCwdRegistry. Pass your own for testing. */
+  readonly cwdRegistry?: CwdRegistry;
   /** Optional absolute path to the web root. Defaults to <cwd>/web. */
   readonly webRoot?: string;
 }
@@ -63,10 +68,11 @@ export function createServer(deps: ServerDeps): RunningServer {
   const sessRepo = new SqliteSessionRepo(db);
   const hub = deps.hub ?? new InMemoryHub(config.maxPwaConnections);
   const sessionRegistry = deps.sessionRegistry ?? new InMemorySessionRegistry(config.maxSessionConnections, config.wsOutboundBufferCapBytes, logger);
+  const cwdRegistry = deps.cwdRegistry ?? new InMemoryCwdRegistry();
   const webRoot = path.resolve(deps.webRoot ?? path.join(process.cwd(), 'web'));
-  const ctx = { msgRepo, sessRepo, logger, db, hub, config, webRoot, sessionRegistry };
+  const ctx = { msgRepo, sessRepo, logger, db, hub, config, webRoot, sessionRegistry, cwdRegistry };
 
-  const sessionSocketDeps = { config, sessRepo, sessionRegistry, hub, logger };
+  const sessionSocketDeps = { config, sessRepo, sessionRegistry, cwdRegistry, hub, logger };
   const userSocketDeps: UserSocketDeps = {
     sessionRegistry,
     messageRepo: msgRepo,
@@ -137,10 +143,12 @@ export function createServer(deps: ServerDeps): RunningServer {
             return;
           }
           logger.info('ws_open', { size: hub.size });
+          // State sync: send each session's current connected state to this new PWA.
+          handleUserSocketOpen(ws, { sessionRepo: sessRepo, sessionRegistry, logger });
         } else {
           // kind === 'session-socket'
           // Registration happens in the message handler (register frame), not here.
-          handleSessionSocketOpen(ws, { logger });
+          handleSessionSocketOpen(ws, sessionSocketDeps);
         }
       },
       close: (ws) => {
@@ -150,7 +158,7 @@ export function createServer(deps: ServerDeps): RunningServer {
           logger.info('ws_close', { size: hub.size });
         } else {
           // kind === 'session-socket'
-          handleSessionSocketClose(ws, { sessionRegistry, hub, sessRepo, logger });
+          handleSessionSocketClose(ws, { sessionRegistry, cwdRegistry, hub, sessRepo, logger });
         }
       },
       message: (ws, rawMessage) => {
