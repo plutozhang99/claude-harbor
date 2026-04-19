@@ -23,6 +23,7 @@ const emptyRepo = {
     upsert: () => {},
     findById: () => null,
     findAll: () => [],
+    updateLastReadAt: () => {},
   } satisfies SessionRepo,
   logger: noopLogger,
 };
@@ -51,6 +52,7 @@ const twoItemRepo = {
         unread_count: 0,
       },
     ],
+    updateLastReadAt: () => {},
   } satisfies SessionRepo,
   logger: noopLogger,
 };
@@ -97,6 +99,7 @@ describe('handleApiSessions', () => {
         upsert: () => {},
         findById: () => null,
         findAll: (): ReadonlyArray<SessionListItem> => { throw new Error('DB exploded'); },
+        updateLastReadAt: () => {},
       } satisfies SessionRepo,
       logger: errorLogger,
     };

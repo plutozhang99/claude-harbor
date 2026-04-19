@@ -15,7 +15,7 @@ describe('multi-session ingest', () => {
 
   beforeAll(() => {
     db = openDatabase(':memory:');
-    const cfg: Config = { port, db_path: ':memory:', log_level: 'error', trustCfAccess: false, wsOutboundBufferCapBytes: 1_048_576 };
+    const cfg: Config = { port, db_path: ':memory:', log_level: 'error', trustCfAccess: false, wsOutboundBufferCapBytes: 1_048_576, wsInboundMaxBadFrames: 5 };
     const logger = createLogger({ level: 'error', stream: { write: () => {} } });
     server = createServer({ config: cfg, db, logger });
   });

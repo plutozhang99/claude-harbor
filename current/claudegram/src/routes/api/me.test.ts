@@ -9,6 +9,7 @@ function makeConfig(overrides: Partial<Config> = {}): Config {
     log_level: 'info',
     trustCfAccess: false,
     wsOutboundBufferCapBytes: 1_048_576,
+    wsInboundMaxBadFrames: 5,
     ...overrides,
   };
 }

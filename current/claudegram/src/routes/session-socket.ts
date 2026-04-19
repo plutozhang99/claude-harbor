@@ -7,6 +7,12 @@ import type { Logger } from '../logger.js';
 import type { Config } from '../config.js';
 import type { SessionRepo } from '../repo/types.js';
 import type { SessionRegistry } from '../ws/session-registry.js';
+import {
+  sendWithBackpressure as _sendWithBackpressure,
+  sendErrorFrame as _sendErrorFrame,
+  type WsErrorReason,
+} from './_ws-helpers.js';
+export type { BackpressureResult } from './_ws-helpers.js';
 
 // ── Per-connection data ───────────────────────────────────────────────────────
 
@@ -34,31 +40,15 @@ type RegisterFrame = z.infer<typeof registerFrameSchema>;
 // ── Outbound helpers ──────────────────────────────────────────────────────────
 
 /**
- * Tagged result from `sendWithBackpressure`.
- * Renamed from `SendResult` to avoid collision with `SessionRegistry.SendResult`.
- */
-export type BackpressureResult = { ok: true } | { ok: false; reason: 'buffer_full' };
-
-/**
- * Outbound error reasons used in session-socket error frames.
- */
-type ErrorReason = 'invalid_payload' | 'internal_error';
-
-/**
- * Send `text` through `ws` unless the socket's outbound buffer has already
- * exceeded `capBytes`.  Returns `{ ok: false, reason: 'buffer_full' }` in that
- * case so callers can decide whether to drop or escalate.
+ * Re-export from shared helper for backward compatibility with tests.
+ * @deprecated Import from `./_ws-helpers.js` directly in new code.
  */
 export function sendWithBackpressure(
   ws: ServerWebSocket<unknown>,
   text: string,
   capBytes: number,
-): BackpressureResult {
-  if (ws.getBufferedAmount() > capBytes) {
-    return { ok: false, reason: 'buffer_full' };
-  }
-  ws.send(text);
-  return { ok: true };
+) {
+  return _sendWithBackpressure(ws, text, capBytes);
 }
 
 // ── Auth gate ─────────────────────────────────────────────────────────────────
@@ -104,17 +94,16 @@ const badFrameCount = new WeakMap<ServerWebSocket<unknown>, number>();
 
 function sendErrorFrame(
   ws: ServerWebSocket<unknown>,
-  reason: ErrorReason,
+  reason: WsErrorReason,
   capBytes: number,
   logger: Logger,
   phase: string,
   session_id?: string,
 ): void {
-  const errorText = JSON.stringify({ type: 'error', reason });
-  const result = sendWithBackpressure(ws, errorText, capBytes);
-  if (!result.ok) {
-    logger.warn('session_socket_buffer_full', { phase, ...(session_id !== undefined ? { session_id } : {}) });
-  }
+  // NOTE: session_id is intentionally NOT included in the JSON frame payload here
+  // (session-socket only sends {type, reason} per the original contract).
+  // It is only used for logging context in the warn path inside _sendErrorFrame.
+  _sendErrorFrame(ws, { reason }, capBytes, logger, phase + (session_id !== undefined ? `[${session_id}]` : ''));
 }
 
 export function handleSessionSocketOpen(

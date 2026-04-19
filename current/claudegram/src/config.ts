@@ -25,6 +25,11 @@ export const configSchema = z.object({
     .int()
     .positive()
     .default(1_048_576),
+  wsInboundMaxBadFrames: z
+    .coerce.number()
+    .int()
+    .positive()
+    .default(5),
 });
 
 export type Config = z.infer<typeof configSchema>;
@@ -40,11 +45,22 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     }
   }
 
+  const rawMaxBadFrames = env["WS_INBOUND_MAX_BAD_FRAMES"];
+  if (rawMaxBadFrames !== undefined) {
+    const parsed = Number(rawMaxBadFrames);
+    if (!Number.isFinite(parsed)) {
+      throw new Error(
+        `Invalid environment variable WS_INBOUND_MAX_BAD_FRAMES: "${rawMaxBadFrames}" is not a finite number`,
+      );
+    }
+  }
+
   return configSchema.parse({
     port: env["CLAUDEGRAM_PORT"],
     db_path: env["CLAUDEGRAM_DB_PATH"],
     log_level: env["CLAUDEGRAM_LOG_LEVEL"],
     trustCfAccess: env["TRUST_CF_ACCESS"] === "true",
     wsOutboundBufferCapBytes: rawCap,
+    wsInboundMaxBadFrames: rawMaxBadFrames,
   });
 }

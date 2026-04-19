@@ -427,3 +427,65 @@ describe('SqliteMessageRepo.findBySessionPage', () => {
     expect(result.has_more).toBe(false);
   });
 });
+
+// ── P2.3: MessageRepo.findById tests ──────────────────────────────────────────
+
+describe('SqliteMessageRepo.findById', () => {
+  it('findById round-trip hit → returns the correct message', () => {
+    insertSession('s1');
+    msgRepo.insert({ session_id: 's1', id: 'm1', direction: 'assistant', ts: 300, content: 'Hi there', ingested_at: 310 });
+    const msg = msgRepo.findById('s1', 'm1');
+    expect(msg).not.toBeNull();
+    expect(msg!.session_id).toBe('s1');
+    expect(msg!.id).toBe('m1');
+    expect(msg!.ts).toBe(300);
+    expect(msg!.content).toBe('Hi there');
+    expect(msg!.direction).toBe('assistant');
+  });
+
+  it('findById unknown id → returns null', () => {
+    insertSession('s1');
+    const msg = msgRepo.findById('s1', 'no-such-id');
+    expect(msg).toBeNull();
+  });
+
+  it('findById with mismatched session_id → returns null (cross-session isolation)', () => {
+    insertSession('s1');
+    insertSession('s2');
+    msgRepo.insert({ session_id: 's2', id: 'm1', direction: 'user', ts: 100, content: 'secret' });
+    // Looking up m1 under s1 should NOT find the s2 message
+    const msg = msgRepo.findById('s1', 'm1');
+    expect(msg).toBeNull();
+  });
+});
+
+// ── P2.3: SessionRepo.updateLastReadAt tests ──────────────────────────────────
+
+describe('SqliteSessionRepo.updateLastReadAt', () => {
+  it('updateLastReadAt on existing session → last_read_at updated', () => {
+    sessRepo.upsert({ id: 's1', name: 'S', now: 1000 });
+    sessRepo.updateLastReadAt('s1', 500);
+    const sess = sessRepo.findById('s1');
+    expect(sess).not.toBeNull();
+    expect(sess!.last_read_at).toBe(500);
+  });
+
+  it('updateLastReadAt monotonic: calling with earlier ts does not roll backwards', () => {
+    sessRepo.upsert({ id: 's1', name: 'S', now: 1000 });
+    sessRepo.updateLastReadAt('s1', 800);
+    sessRepo.updateLastReadAt('s1', 400); // earlier ts — must NOT overwrite 800
+    const sess = sessRepo.findById('s1');
+    expect(sess).not.toBeNull();
+    expect(sess!.last_read_at).toBe(800); // still 800, not 400
+  });
+
+  it('updateLastReadAt on unknown session_id → no throw, no rows affected (no-op)', () => {
+    // Should not throw even though session doesn't exist
+    expect(() => {
+      sessRepo.updateLastReadAt('nonexistent-session', 12345);
+    }).not.toThrow();
+    // Verify nothing was created
+    const sess = sessRepo.findById('nonexistent-session');
+    expect(sess).toBeNull();
+  });
+});

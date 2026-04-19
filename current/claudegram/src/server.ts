@@ -17,6 +17,11 @@ import {
   handleSessionSocketMessage,
   handleSessionSocketClose,
 } from './routes/session-socket.js';
+import {
+  handleUserSocketMessage,
+  handleUserSocketClose,
+  type UserSocketDeps,
+} from './routes/user-socket.js';
 
 export interface ServerDeps {
   readonly config: Config;
@@ -62,6 +67,15 @@ export function createServer(deps: ServerDeps): RunningServer {
   const ctx = { msgRepo, sessRepo, logger, db, hub, config, webRoot };
 
   const sessionSocketDeps = { config, sessRepo, sessionRegistry, logger };
+  const userSocketDeps: UserSocketDeps = {
+    sessionRegistry,
+    messageRepo: msgRepo,
+    sessionRepo: sessRepo,
+    hub,
+    logger,
+    maxBadFrames: config.wsInboundMaxBadFrames,
+    outboundBufferCapBytes: config.wsOutboundBufferCapBytes,
+  };
 
   const server = Bun.serve<WsData>({
     port: config.port,
@@ -110,6 +124,7 @@ export function createServer(deps: ServerDeps): RunningServer {
       },
       close: (ws) => {
         if (ws.data.kind === 'user-socket') {
+          handleUserSocketClose(ws);
           hub.remove(ws);
           logger.info('ws_close', { size: hub.size });
         } else {
@@ -123,7 +138,7 @@ export function createServer(deps: ServerDeps): RunningServer {
             handleSessionSocketMessage(ws, rawMessage as string | Buffer, sessionSocketDeps);
             break;
           case 'user-socket':
-            // Reserved for P2.3 — ignore inbound frames from user-socket for now.
+            handleUserSocketMessage(ws, rawMessage as string | Buffer, userSocketDeps);
             break;
         }
       },

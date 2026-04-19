@@ -14,12 +14,14 @@ const stubMsgRepo: MessageRepo = {
   insert: () => {},
   findBySession: () => [],
   findBySessionPage: () => ({ messages: [], has_more: false }),
+  findById: () => null,
 };
 
 const stubSessRepo: SessionRepo = {
   upsert: () => {},
   findById: () => null,
   findAll: () => [],
+  updateLastReadAt: () => {},
 };
 
 // Provide a real in-memory DB so RouterCtx is satisfied;
@@ -57,6 +59,7 @@ const ctx: RouterCtx = {
     log_level: 'info',
     trustCfAccess: false,
     wsOutboundBufferCapBytes: 1_048_576,
+    wsInboundMaxBadFrames: 5,
   },
   // Point at a nonexistent dir so static file handlers return 404 (no disk I/O needed).
   webRoot: '/tmp/__claudegram_test_nonexistent_web__',

@@ -14,6 +14,7 @@ export class SqliteMessageRepo implements MessageRepo {
   private readonly stmtPageLookupCursor: ReturnType<Database['prepare']>;
   private readonly stmtPageWithBefore: ReturnType<Database['prepare']>;
   private readonly stmtPageWithoutBefore: ReturnType<Database['prepare']>;
+  private readonly stmtFindById: ReturnType<Database['prepare']>;
 
   constructor(private readonly db: Database) {
     this.stmtInsertWithIngested = db.prepare(
@@ -65,6 +66,12 @@ export class SqliteMessageRepo implements MessageRepo {
        WHERE session_id=?
        ORDER BY ts DESC, id DESC
        LIMIT ?`
+    );
+
+    this.stmtFindById = db.prepare(
+      `SELECT session_id, id, direction, ts, ingested_at, content
+       FROM messages
+       WHERE session_id=? AND id=?`
     );
   }
 
@@ -126,6 +133,10 @@ export class SqliteMessageRepo implements MessageRepo {
     const has_more = rows.length > limit;
     return { messages: rows.slice(0, limit), has_more };
   }
+
+  findById(session_id: string, id: string): Readonly<Message> | null {
+    return (this.stmtFindById.get(session_id, id) as Message | null) ?? null;
+  }
 }
 
 // ─────────────────────────────── SessionRepo ───────────────────────────────
@@ -134,6 +145,7 @@ export class SqliteSessionRepo implements SessionRepo {
   private readonly stmtUpsert: ReturnType<Database['prepare']>;
   private readonly stmtFindById: ReturnType<Database['prepare']>;
   private readonly stmtFindAll: ReturnType<Database['prepare']>;
+  private readonly stmtUpdateLastReadAt: ReturnType<Database['prepare']>;
 
   constructor(private readonly db: Database) {
     this.stmtUpsert = db.prepare(
@@ -158,6 +170,10 @@ export class SqliteSessionRepo implements SessionRepo {
        GROUP BY s.id, s.name, s.first_seen_at, s.last_seen_at, s.status, s.last_read_at
        ORDER BY s.last_seen_at DESC`
     );
+
+    this.stmtUpdateLastReadAt = db.prepare(
+      `UPDATE sessions SET last_read_at = MAX(COALESCE(last_read_at, 0), ?) WHERE id = ?`
+    );
   }
 
   upsert(s: SessionUpsert): void {
@@ -170,5 +186,9 @@ export class SqliteSessionRepo implements SessionRepo {
 
   findAll(): ReadonlyArray<SessionListItem> {
     return this.stmtFindAll.all() as SessionListItem[];
+  }
+
+  updateLastReadAt(session_id: string, ts: number): void {
+    this.stmtUpdateLastReadAt.run(ts, session_id);
   }
 }

@@ -13,7 +13,7 @@ const BASE_PORT = 38000 + (process.pid % 1000);
 
 function makeConfig(port: number): Config {
   // Bypass Zod to allow port=0-style ephemeral. Tests use explicit high ports.
-  return { port, db_path: ':memory:', log_level: 'error', trustCfAccess: false, wsOutboundBufferCapBytes: 1_048_576 };
+  return { port, db_path: ':memory:', log_level: 'error', trustCfAccess: false, wsOutboundBufferCapBytes: 1_048_576, wsInboundMaxBadFrames: 5 };
 }
 
 const logger = createLogger({ level: 'error' });

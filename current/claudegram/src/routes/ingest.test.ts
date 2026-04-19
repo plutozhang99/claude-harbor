@@ -81,6 +81,7 @@ describe('POST /ingest', () => {
         log_level: 'info',
         trustCfAccess: false,
         wsOutboundBufferCapBytes: 1_048_576,
+        wsInboundMaxBadFrames: 5,
       },
       webRoot: '/tmp/__claudegram_test_nonexistent_web__',
     };
@@ -282,12 +283,14 @@ describe('POST /ingest', () => {
       insert: () => { throw new Error('DB exploded'); },
       findBySession: () => [],
       findBySessionPage: () => ({ messages: [], has_more: false }),
+      findById: () => null,
     };
 
     const stubSessRepo: SessionRepo = {
       upsert: () => {},
       findById: () => null,
       findAll: () => [],
+      updateLastReadAt: () => {},
     };
 
     const stubCtx: RouterCtx = {
@@ -302,6 +305,7 @@ describe('POST /ingest', () => {
         log_level: 'info',
         trustCfAccess: false,
         wsOutboundBufferCapBytes: 1_048_576,
+        wsInboundMaxBadFrames: 5,
       },
       webRoot: '/tmp/__claudegram_test_nonexistent_web__',
     };
@@ -396,12 +400,14 @@ describe('POST /ingest', () => {
       insert: () => { throw new Error('DB exploded'); },
       findBySession: () => [],
       findBySessionPage: () => ({ messages: [], has_more: false }),
+      findById: () => null,
     };
 
     const throwingSessRepo: SessionRepo = {
       upsert: () => {},
       findById: () => null,
       findAll: () => [],
+      updateLastReadAt: () => {},
     };
 
     const failCtx: RouterCtx = {
@@ -416,6 +422,7 @@ describe('POST /ingest', () => {
         log_level: 'info',
         trustCfAccess: false,
         wsOutboundBufferCapBytes: 1_048_576,
+        wsInboundMaxBadFrames: 5,
       },
       webRoot: '/tmp/__claudegram_test_nonexistent_web__',
     };

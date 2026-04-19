@@ -31,6 +31,8 @@ export interface MessageRepo {
     session_id: string,
     opts?: { before_id?: string; limit?: number },
   ): { readonly messages: ReadonlyArray<Message>; readonly has_more: boolean };
+  /** Look up a single message by composite primary key (session_id, id). Returns null on miss or cross-session. */
+  findById(session_id: string, id: string): Readonly<Message> | null;
 }
 
 // TODO(P2): expose updateStatus / markEnded method on SessionRepo — status is currently write-only via raw SQL
@@ -38,4 +40,10 @@ export interface SessionRepo {
   upsert(s: SessionUpsert): void;
   findById(id: string): Readonly<Session> | null;
   findAll(): ReadonlyArray<SessionListItem>;
+  /**
+   * Monotonically advance `last_read_at` for the given session.
+   * SQL: UPDATE sessions SET last_read_at = MAX(last_read_at, ?) WHERE id = ?
+   * No-op if session_id doesn't exist. Never rolls back.
+   */
+  updateLastReadAt(session_id: string, ts: number): void;
 }

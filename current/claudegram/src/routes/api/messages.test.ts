@@ -40,6 +40,7 @@ describe('handleApiMessages', () => {
       insert: () => {},
       findBySession: () => [],
       findBySessionPage: () => ({ messages: [], has_more: false }),
+      findById: () => null,
     });
     const r = await handleApiMessages(makeReq('GET'), repo);
     expect(r.status).toBe(400);
@@ -59,6 +60,7 @@ describe('handleApiMessages', () => {
       insert: () => {},
       findBySession: () => [],
       findBySessionPage,
+      findById: () => null,
     });
 
     const r = await handleApiMessages(makeReq('GET', 'session_id=s1'), repo);
@@ -84,6 +86,7 @@ describe('handleApiMessages', () => {
       insert: () => {},
       findBySession: () => [],
       findBySessionPage,
+      findById: () => null,
     });
 
     await handleApiMessages(makeReq('GET', 'session_id=s1&before=m9&limit=10'), repo);
@@ -99,6 +102,7 @@ describe('handleApiMessages', () => {
       insert: () => {},
       findBySession: () => [],
       findBySessionPage: () => ({ messages: [], has_more: false }),
+      findById: () => null,
     });
     const r = await handleApiMessages(makeReq('GET', 'session_id=s1&limit=abc'), repo);
     expect(r.status).toBe(400);
@@ -116,6 +120,7 @@ describe('handleApiMessages', () => {
       insert: () => {},
       findBySession: () => [],
       findBySessionPage,
+      findById: () => null,
     });
 
     const r = await handleApiMessages(makeReq('GET', 'session_id=s1&limit=-1'), repo);
@@ -131,6 +136,7 @@ describe('handleApiMessages', () => {
       insert: () => {},
       findBySession: () => [],
       findBySessionPage: () => ({ messages: [], has_more: false }),
+      findById: () => null,
     });
     const r = await handleApiMessages(makeReq('POST'), repo);
     expect(r.status).toBe(405);
@@ -150,6 +156,7 @@ describe('handleApiMessages', () => {
         insert: () => {},
         findBySession: () => [],
         findBySessionPage: (): never => { throw new Error('DB exploded'); },
+        findById: () => null,
       } satisfies MessageRepo,
       logger: errorLogger,
     };
