@@ -23,6 +23,8 @@
 | `59177e6` | feat: Mistral.ai-inspired warm design refresh |
 | `99deb78` | feat: replace conn-pill with three-state header status bar |
 | `b8fa604` | feat: rename sessions + per-session status dot + chrono order |
+| `2024ea3` | docs: archive post-P2 hotfix + design + status-bar + rename batch |
+| `200008c` | feat: move connection-state indicator to session row left bar |
 
 ---
 
@@ -197,6 +199,35 @@ Each batch below addresses a tranche of these.
 ### Tests
 - 13 new tests: 3 for `SessionRepo.rename` (existing → true + name updated; unknown → false; idempotent same-name → true), 8 PATCH route tests (200 happy path, 404 unknown, 400 invalid bodies, 400 empty name, 400 too long, 400 missing field, broadcast verification, connected field in response), plus stub-method alignment in 4 other test files.
 - 314 → 327 pass.
+
+---
+
+## Batch 5 — Connection-state bar relocation (commit `200008c`)
+
+**Trigger**: user feedback that the inline status dot (Batch 4) was redundant with the row's existing left border. The pre-existing 3px transparent border on `<li>` was already showing hover/selected highlights — user wanted that bar repurposed to carry the connection-state signal, slightly thicker, never overwritten by hover/selected.
+
+### Changes
+- **render.js**: removed the `.session-status-dot` `<span>`. Now sets `li.dataset.connected = "online" | "offline" | "unknown"` and writes a hover-tooltip via `li.title`. Accessibility kept via a trailing `<span class="sr-only">(online)</span>` for screen readers.
+- **style.css**:
+  - Bumped `border-left` from 3px to **5px** on `#session-list li`.
+  - Added `[data-connected="online"|"offline"|"unknown"]` selectors that drive `border-left-color` directly:
+    - `online` → Mistral Black (`var(--ink)`)
+    - `offline` → Mistral Orange (`var(--accent)`)
+    - `unknown` → Sunshine 300 (`var(--surface3)`)
+  - **Removed** the `border-left-color` overrides on `:hover` and `[aria-selected="true"]` so the live connection state stays visible regardless of interaction state.
+  - Added a single targeted exception: `[aria-selected="true"][data-connected="online"]` flips the bar to Bright Yellow (`var(--yellow)`) — the dark bar would otherwise melt into the Mistral Black selected-row background. Offline/unknown bar colors already pop on the dark bg.
+  - Padding-left bumped from 0.85rem → 0.95rem to keep `.session-name` x-position constant despite the thicker bar.
+  - `border-left-color` transition extended to 180ms (vs 120ms on bg/color) so live `connected` toggles animate gently.
+  - Removed ~17 lines of orphaned `.session-status-dot` rules.
+- **sw.js**: cache version `v1-mistral-status-bar`.
+
+### Why this design
+- **Single source of truth for connection state across the entire UI**: the same `session.connected` field now drives (a) header `[FAKECHAT]` + `[SESSION]` pills, (b) sidebar row left bar, and (c) compose send-button enable/disable. No state can drift.
+- **No double signal redundancy**: removing the dot avoids the user having to scan two indicators per row.
+- **Hover/selected legibility preserved via background only**: Mistral palette has enough chroma in surface2 (Block Gold) and ink (Mistral Black) to make hover/selected unambiguous without needing the bar.
+
+### Tests
+- Unchanged: 327 pass / 0 fail / 1 skip. `bun tsc --noEmit` clean.
 
 ---
 
