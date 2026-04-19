@@ -37,6 +37,50 @@ ws.on('error', (frame) => {
   }
 });
 
+// ── Header status pills ───────────────────────────────────────────
+// system-pill is driven by ws.js itself (open/closed/connecting).
+// fakechat-pill + session-pill react to store changes.
+function updateStatusPills() {
+  // Fakechat pill: count online vs total. connected:true is set by /api/sessions
+  // and updated live via session_update broadcasts (P2-hotfix2).
+  const sessions = Array.from(store.state.sessions.values());
+  const total = sessions.length;
+  const online = sessions.filter((s) => s.connected === true).length;
+  const fakechatPill = document.getElementById('fakechat-pill');
+  if (fakechatPill) {
+    const valueEl = fakechatPill.querySelector('.status-value');
+    if (valueEl) valueEl.textContent = `${online}/${total}`;
+    let state = 'empty';
+    if (total > 0) {
+      if (online === 0) state = 'all-offline';
+      else if (online === total) state = 'all';
+      else state = 'partial';
+    }
+    fakechatPill.setAttribute('data-state', state);
+  }
+
+  // Session pill: reflect the active session's connected state.
+  const sessionPill = document.getElementById('session-pill');
+  if (sessionPill) {
+    const valueEl = sessionPill.querySelector('.status-value');
+    const activeId = store.state.activeId;
+    let state = 'none';
+    let label = 'none';
+    if (activeId !== null) {
+      const active = store.state.sessions.get(activeId);
+      if (active && active.connected === true)       { state = 'online';  label = 'online'; }
+      else if (active && active.connected === false) { state = 'offline'; label = 'offline'; }
+      else                                            { state = 'offline'; label = 'unknown'; } // missing field → conservative
+    }
+    if (valueEl) valueEl.textContent = label;
+    sessionPill.setAttribute('data-state', state);
+  }
+}
+
+store.on('change', updateStatusPills);
+// Initial paint in case sessions hydrate before first store 'change' fires.
+updateStatusPills();
+
 /**
  * Send a reply via the user-socket WebSocket. Appends an optimistic local
  * echo of the user's own message so they can see what they sent (the real

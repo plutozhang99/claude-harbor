@@ -15,7 +15,20 @@
   <header>
     <button class="sidebar-toggle" id="sidebar-toggle" aria-controls="sidebar" aria-expanded="false" aria-label="Toggle sessions sidebar">&#9776;</button>
     <h1 class="app-name">claudegram</h1>
-    <span class="conn-pill" id="conn-pill" aria-live="polite" aria-label="Connection status">connecting</span>
+    <div class="status-bar" role="status" aria-live="polite" aria-label="System status">
+      <span class="status-pill" id="system-pill" data-state="connecting" title="claudegram server connection">
+        <span class="status-label">sys</span>
+        <span class="status-value">connecting</span>
+      </span>
+      <span class="status-pill" id="fakechat-pill" data-state="empty" title="fakechat sessions online / total">
+        <span class="status-label">fakechat</span>
+        <span class="status-value">0/0</span>
+      </span>
+      <span class="status-pill" id="session-pill" data-state="none" title="active conversation status">
+        <span class="status-label">session</span>
+        <span class="status-value">none</span>
+      </span>
+    </div>
   </header>
 
   <div class="layout">

@@ -88,22 +88,52 @@ header {
   color: var(--ink);
 }
 
-/* Status pill — warm-only, no green/red. Filled background carries the signal. */
-.conn-pill {
-  font-size: 0.72rem;
+/* Status bar — three pills: system / fakechat / session. Warm-only. */
+.status-bar {
+  display: flex; gap: 0.4rem; align-items: center;
+  flex-wrap: wrap; justify-content: flex-end;
+}
+
+.status-pill {
+  display: inline-flex; align-items: stretch;
+  font-size: 0.7rem;
   font-family: Arial, monospace;
   text-transform: uppercase;
   letter-spacing: 0.06em;
-  padding: 0.3em 0.8em;
+  border: 1px solid var(--ink);
   border-radius: var(--radius-pill);
+  overflow: hidden;
+  white-space: nowrap;
+  line-height: 1;
+}
+.status-pill .status-label {
+  background: var(--surface);
+  color: var(--ink-dim);
+  padding: 0.32em 0.55em;
+  border-right: 1px solid var(--border-warm);
+}
+.status-pill .status-value {
+  padding: 0.32em 0.7em;
   background: var(--surface2);
   color: var(--ink);
-  border: 1px solid var(--border-warm);
-  white-space: nowrap;
+  font-weight: 400;
 }
-.conn-pill[data-state="open"]       { background: var(--ink);       color: var(--yellow);   border-color: var(--ink); }
-.conn-pill[data-state="closed"]     { background: var(--accent);    color: #fff;            border-color: var(--accent); }
-.conn-pill[data-state="connecting"] { background: var(--surface3);  color: var(--ink);      border-color: var(--ink); }
+
+/* System pill — claudegram server / WS state */
+#system-pill[data-state="open"]       .status-value { background: var(--ink);      color: var(--yellow); }
+#system-pill[data-state="closed"]     .status-value { background: var(--accent);   color: #fff; }
+#system-pill[data-state="connecting"] .status-value { background: var(--surface3); color: var(--ink); }
+
+/* Fakechat pill — N online / N total registered */
+#fakechat-pill[data-state="empty"]      .status-value { background: var(--surface2); color: var(--ink-dim); }
+#fakechat-pill[data-state="all"]        .status-value { background: var(--ink);      color: var(--yellow); }
+#fakechat-pill[data-state="partial"]    .status-value { background: var(--sunshine); color: var(--ink); }
+#fakechat-pill[data-state="all-offline"].status-value { background: var(--accent);   color: #fff; }
+
+/* Session pill — active conversation reachability */
+#session-pill[data-state="none"]    .status-value { background: var(--surface2); color: var(--ink-dim); }
+#session-pill[data-state="online"]  .status-value { background: var(--ink);      color: var(--yellow); }
+#session-pill[data-state="offline"] .status-value { background: var(--accent);   color: #fff; }
 
 .sidebar-toggle {
   display: none; background: transparent; border: 1px solid var(--ink);

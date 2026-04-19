@@ -3,7 +3,7 @@
  * Manages connection state and dispatches typed events.
  */
 
-const PILL_ID = 'conn-pill';
+const PILL_ID = 'system-pill';
 const BACKOFF_INITIAL = 250;
 const BACKOFF_CAP = 8000;
 
@@ -23,7 +23,10 @@ export function createWsClient(url) {
     const pill = document.getElementById(PILL_ID);
     if (!pill) return;
     pill.setAttribute('data-state', state);
-    pill.textContent = text;
+    // The system pill uses a label/value internal structure; only update value.
+    const valueEl = pill.querySelector('.status-value');
+    if (valueEl) valueEl.textContent = text;
+    else pill.textContent = text; // fallback if structure changed
   }
 
   function emit(type, payload) {
