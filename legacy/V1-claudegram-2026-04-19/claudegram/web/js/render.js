@@ -2,6 +2,11 @@
  * DOM renderer that reacts to store 'change' events and updates the UI.
  */
 
+import { renderMarkdown } from './markdown.js';
+
+/** Label used in message bubbles for the assistant direction. */
+const ASSISTANT_LABEL = 'Claude';
+
 /**
  * Format a timestamp string or epoch ms into HH:MM:SS.
  * @param {string|number} ts
@@ -28,6 +33,7 @@ export function createRenderer({ store, onSelectSession, onSendReply, onDeleteSe
   const composeTextEl = document.getElementById('compose-text');
   const sendBtnEl = document.getElementById('send-btn');
   const composeFormEl = document.getElementById('compose');
+  const statuslineEl = document.getElementById('statusline');
 
   let prevMessageCount = 0;
 
@@ -156,19 +162,44 @@ export function createRenderer({ store, onSelectSession, onSendReply, onDeleteSe
       li.dataset.msgId = String(msg.id);
       if (msg.pending) li.dataset.state = 'pending';
       else if (msg.failed) li.dataset.state = 'failed';
-      const who = msg.direction === 'user' ? 'you' : 'them';
+      const who = msg.direction === 'user' ? 'you' : ASSISTANT_LABEL;
       const statusTag = msg.pending
         ? ' <span class="msg-status pending">sending…</span>'
         : msg.failed
           ? ` <span class="msg-status failed">delivery failed: ${escapeHtml(String(msg.failed_reason ?? 'unknown'))}</span>`
           : '';
+      // User messages render as plain escaped text (they typed it literally).
+      // Assistant messages run through the markdown pipeline so code blocks,
+      // bold/italic, links, and lists look right.
+      const raw = String(msg.content ?? msg.text ?? '');
+      const bodyHtml = msg.direction === 'user' ? escapeHtml(raw) : renderMarkdown(raw);
       li.innerHTML =
         `<span class="msg-meta">` +
         `<span class="ts">${escapeHtml(formatTime(msg.ts ?? msg.ingested_at))}</span>` +
         `<span class="who">${escapeHtml(who)}</span>` +
         `</span>` +
-        `<span class="msg-body">${escapeHtml(String(msg.content ?? msg.text ?? ''))}</span>` +
+        `<span class="msg-body">${bodyHtml}</span>` +
         statusTag;
+      messagesEl.appendChild(li);
+    }
+
+    // Waiting indicator: user has sent something and no assistant reply has
+    // arrived yet for this session. Lives only in local state; survives only
+    // until the next assistant message or page refresh.
+    if (store.state.waitingBySession && store.state.waitingBySession.get(activeId) === true) {
+      const li = document.createElement('li');
+      li.dataset.from = 'assistant';
+      li.dataset.state = 'waiting';
+      li.className = 'msg-waiting';
+      li.setAttribute('aria-live', 'polite');
+      li.innerHTML =
+        `<span class="msg-meta">` +
+        `<span class="ts">now</span>` +
+        `<span class="who">${escapeHtml(ASSISTANT_LABEL)}</span>` +
+        `</span>` +
+        `<span class="msg-body"><span class="typing-dots" aria-label="${escapeHtml(ASSISTANT_LABEL)} is thinking">` +
+        `<span class="dot"></span><span class="dot"></span><span class="dot"></span>` +
+        `</span></span>`;
       messagesEl.appendChild(li);
     }
 
@@ -179,15 +210,62 @@ export function createRenderer({ store, onSelectSession, onSendReply, onDeleteSe
     }
   }
 
+  function renderStatusline() {
+    if (!statuslineEl) return;
+    const { activeId, statuslineBySession } = store.state;
+    const snap = activeId !== null ? statuslineBySession.get(activeId) : null;
+    if (!snap) {
+      statuslineEl.innerHTML = '';
+      statuslineEl.dataset.state = 'empty';
+      return;
+    }
+    statuslineEl.dataset.state = 'live';
+    const model = snap.model ?? '—';
+    const ctx = buildBar('ctx', snap.ctx_pct);
+    const fiveH = buildBar('5h', snap.five_h_pct);
+    const sevenD = buildBar('7d', snap.seven_d_pct, snap.seven_d_reset_at);
+    statuslineEl.innerHTML =
+      `<span class="sl-model" title="Active model">${escapeHtml(model)}</span>` +
+      ctx + fiveH + sevenD;
+  }
+
   function render() {
     renderSessions();
     renderMessages();
+    renderStatusline();
     updateSendBtn();
   }
 
   store.on('change', render);
 
   return { render };
+}
+
+/**
+ * Render one statusline progress bar. Returns HTML string.
+ * @param {string} label short label to show before the bar (e.g. 'ctx', '5h', '7d')
+ * @param {number|null} pct 0–100 value, or null when unknown
+ * @param {string|null} [resetAt] optional reset timestamp (raw string) for tooltip
+ */
+function buildBar(label, pct, resetAt) {
+  if (typeof pct !== 'number' || !isFinite(pct)) {
+    return `<span class="sl-bar sl-bar--empty" data-label="${escapeHtml(label)}">` +
+      `<span class="sl-bar-label">${escapeHtml(label)}</span>` +
+      `<span class="sl-bar-track" aria-hidden="true"></span>` +
+      `<span class="sl-bar-pct">—</span></span>`;
+  }
+  const clamped = Math.max(0, Math.min(100, pct));
+  const int = Math.round(clamped);
+  const state = int >= 90 ? 'crit' : int >= 70 ? 'warn' : 'ok';
+  const title = resetAt
+    ? `${label} ${int}% (resets ${resetAt})`
+    : `${label} ${int}%`;
+  return `<span class="sl-bar" data-label="${escapeHtml(label)}" data-state="${state}" title="${escapeHtml(title)}">` +
+    `<span class="sl-bar-label">${escapeHtml(label)}</span>` +
+    `<span class="sl-bar-track" aria-hidden="true">` +
+      `<span class="sl-bar-fill" style="width:${int}%"></span>` +
+    `</span>` +
+    `<span class="sl-bar-pct">${int}%</span></span>`;
 }
 
 /**

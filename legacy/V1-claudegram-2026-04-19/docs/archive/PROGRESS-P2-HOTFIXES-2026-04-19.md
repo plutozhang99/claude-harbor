@@ -10,10 +10,10 @@
 - current/claudegram/DESIGN.md (Mistral.ai design system fetched via `npx getdesign@latest add mistral.ai`)
 
 ## Status: ALL SHIPPED (2026-04-19)
-- claudegram suite: **327 pass / 0 fail / 1 skip**
-- fakechat suite: **48 pass / 0 fail** (untouched in this batch)
+- claudegram suite: **355 pass / 0 fail / 1 skip** (up from 327 — 28 new tests across Batches 6–8)
+- fakechat suite: **48 pass / 0 fail**
 - `bun tsc --noEmit`: clean in both packages
-- Branch is 12 commits ahead of origin/main
+- Batches 6–8 currently uncommitted — pending user-driven smoke test
 
 ## Commit history (chronological — P2 archive was a1bfe15)
 
@@ -25,6 +25,10 @@
 | `b8fa604` | feat: rename sessions + per-session status dot + chrono order |
 | `2024ea3` | docs: archive post-P2 hotfix + design + status-bar + rename batch |
 | `200008c` | feat: move connection-state indicator to session row left bar |
+| `5ba162a` | docs: append Batch 5 (bar relocation) to post-P2 hotfix archive |
+| _(pending)_ | feat: live Claude Code statusline bridge + unread read-pointer fix (Batch 6) |
+| _(pending)_ | feat: markdown in replies, typing indicator, "Claude" label (Batch 7) |
+| _(pending)_ | fix: name-clobber on upsert + SW cache bump + cwd-scoped fakechat ULID (Batch 8) |
 
 ---
 
@@ -228,6 +232,173 @@ Each batch below addresses a tranche of these.
 
 ### Tests
 - Unchanged: 327 pass / 0 fail / 1 skip. `bun tsc --noEmit` clean.
+
+---
+
+## Batch 6 — Live Claude Code statusline bridge + unread read-pointer fix (pending commit)
+
+**Scope**: surface Claude Code's statusline (model, ctx %, 5h + 7d quota bars) inside the PWA compose row, plus fix the persistent-unread-on-refresh bug that surfaced during the same session. One coder pass, no multi-agent fleet — same rationale as Batches 1–5 (tight scope, extensive tests, user actively smoke-testing each change).
+
+### Gap that triggered this batch
+User asked: "can we show the per-session statusline data under the input field on the PWA, including mobile?" Claude Code's statusline is the only surface that gets `model`, `context_window.used_percentage`, and `rate_limits.{five_hour,seven_day}.used_percentage` — none of which are exposed via any public API, only piped as stdin JSON to `~/.claude/statusline-command.sh`. Separately, during the same session the user observed that unread badges resurrect after a page refresh — server-side `last_read_at` was never being advanced because the PWA did not emit `mark_read` frames.
+
+### Session-id namespace problem (why cwd bridges it)
+Investigation surfaced that **fakechat's session_id and Claude Code's statusline `.session_id` live in unrelated namespaces**: `ls ~/.claude/channels/fakechat/` showed only `pid-XXXXX` directories, meaning Claude Code does NOT pass `CLAUDE_SESSION_ID` env var to MCP server subprocesses. Fakechat's fallback persists a ULID per STATE_DIR; CC's statusline UUID is never seen by fakechat. The only field both sides agree on is **cwd** (fakechat runs in the project dir; statusline JSON has `.cwd` and `.workspace.current_dir`). Bridging via cwd was chosen over the alternate SessionStart-hook-writes-file-then-fakechat-watches path because (a) MCP servers start BEFORE SessionStart hooks fire, so fakechat would need to re-register mid-life, and (b) cwd matching is one extra field in the existing register frame.
+
+### FIX A — cwd propagation (fakechat → claudegram)
+- `current/fakechat/src/claudegram-client.ts`: `ClaudegramClientConfig` gains `cwd?: string`; the `register` frame now carries it alongside `session_id` / `session_name`
+- `current/fakechat/server.ts`: passes `process.cwd()` to the client at construction
+
+### FIX B — CwdRegistry (claudegram)
+- `current/claudegram/src/ws/cwd-registry.ts` (new): `InMemoryCwdRegistry` — `Map<cwd, session_id>` with `set`, `lookup`, `clearBySession`, `size`. Separate from `SessionRegistry` on purpose — different lifecycle (cwd map survives across session eviction/rebind), different consumer (only the statusline route).
+- `current/claudegram/src/ws/cwd-registry.test.ts` (new): 6 unit tests covering set / lookup / last-writer-wins / clearBySession (including the multi-cwd → same session edge case) / unknown-session no-op / size tracking.
+- `current/claudegram/src/routes/session-socket.ts`: register schema accepts optional `cwd`; on successful `tryRegister` the cwd is recorded; on `close`, `cwdRegistry.clearBySession(session_id)` runs so a fakechat restart won't leave a dangling mapping.
+- `current/claudegram/src/server.ts` + `src/http.ts`: wire `cwdRegistry` through `ServerDeps`, `RouterCtx`, and `SessionSocketDeps`. Both are **optional** in the interface types with a runtime `InMemoryCwdRegistry()` fallback — a deliberate choice to avoid touching ~20 existing test harnesses that build deps manually.
+
+### FIX C — `POST /internal/statusline` route (claudegram)
+- `current/claudegram/src/routes/statusline.ts` (new): accepts the raw Claude Code statusline stdin JSON; extracts `model.display_name`, `context_window.used_percentage`, `rate_limits.five_hour.used_percentage`, `rate_limits.seven_day.{used_percentage,reset_at}`; resolves session via `cwdRegistry.lookup(cwd ?? workspace.current_dir ?? workspace.project_dir)`; broadcasts `{type:'statusline', session_id, statusline: {...}}` via `hub.broadcast`. Returns `{ok:true, matched:false}` on unknown cwd (not an error — statusline fires before fakechat may be connected).
+- **Loopback gate**: route rejects any request whose URL hostname isn't `127.0.0.1` / `::1` / `localhost` with 403. Same-host posture is sufficient pre-P4 because the statusline script runs on the user's laptop.
+- `current/claudegram/src/routes/statusline.test.ts` (new): 8 route tests covering wrong-method, non-loopback rejection, invalid JSON, missing cwd, unknown cwd, happy path with all fields, `workspace.current_dir` fallback, and defensive null-filling when `rate_limits` / `context_window` are omitted.
+- `current/claudegram/src/ws/hub.ts`: `BroadcastPayload` gains a `statusline` variant with a `StatuslineSnapshot` type (`model | null`, `ctx_pct | null`, `five_h_pct | null`, `seven_d_pct | null`, `seven_d_reset_at | null`). All fields nullable because Claude Code's JSON shape is undocumented and may omit fields across versions.
+- `current/claudegram/src/http.ts`: `/internal/statusline` wired before the `/api/*` fallback; no schema changes to DB.
+
+### FIX D — Frontend statusline render
+- `current/claudegram/web/js/store.js`: new `statuslineBySession: Map<sessionId, snapshot>`; `applyStatusline(sessionId, snapshot)` replaces prior value (latest-wins), updates `updated_at` timestamp, emits `change`.
+- `current/claudegram/web/js/ws.js`: dispatches `statusline` events alongside existing `message` / `session_update` / `session_deleted` / `error`.
+- `current/claudegram/web/js/index.js`: subscribes, forwards to `store.applyStatusline`.
+- `current/claudegram/web/js/render.js`: new `renderStatusline()` + `buildBar()`. Active session's snapshot → `[model] [ctx bar] [5h bar] [7d bar]` inside `.compose-row`. Bars colour-code: `ok` (<70%) green, `warn` (70–89%) amber, `crit` (≥90%) red. Null percentages render as a greyed-out `—` with an empty track. 7d reset timestamp surfaces in the bar's `title` tooltip.
+- `current/claudegram/web/index.html`: new `<div class="statusline" id="statusline" aria-live="polite" aria-label="Claude Code statusline">` child of `.compose-row`, rendered between the textarea and the send button.
+- `current/claudegram/web/style.css`: statusline styles (flex layout, mini 4.5rem track, `transition: width 0.3s ease` on the fill); mobile `@media (max-width: 640px)` forces the statusline onto its own row above the send button with narrower tracks; `@media (max-width: 380px)` shrinks further.
+
+### FIX E — `~/.claude/statusline-command.sh` bridge hook (global)
+The script is append-only modified: after reading stdin, it does a fire-and-forget `curl` (500 ms timeout, stderr silenced) to `$CLAUDEGRAM_STATUSLINE_URL` if that env var is set. Default stdout output (what Claude Code renders in its own statusline) is unchanged. Users opt in by exporting `CLAUDEGRAM_STATUSLINE_URL=http://127.0.0.1:8788/internal/statusline` in the shell that launches `claude`. This is the only change outside the claudegram / fakechat repos.
+
+### FIX F — `mark_read` from PWA (unread-on-refresh bug)
+Root cause: `web/js/store.js:setActive` cleared unread locally but the PWA never sent a `mark_read` WS frame. Server-side `user-socket.ts:handleMarkReadFrame` + `sessionRepo.updateLastReadAt` were already wired; nobody called them. On refresh, `GET /api/sessions` recomputed `unread_count` from the DB `last_read_at=0` and the badge came back.
+
+- `current/claudegram/web/js/index.js`:
+  - Subscribes to the WS `message` event and, if the message is an assistant reply for the currently active session, sends `{type:'mark_read', session_id, up_to_message_id: message.id}` — advances the server-side pointer in real time.
+  - `onSelectSession` now calls a new `maybeMarkRead(sessionId)` helper after hydration: walks back to the newest message in the session and sends a `mark_read`. Server's monotonic `MAX(last_read_at, ts)` guarantees safety even if the newest message is a user message.
+  - On WS `connect` (including reconnects), re-sends `mark_read` for the active session. Handles the boot race where `onSelectSession` may fire before the socket is open.
+- No server-side changes; the inbound handler has been wired since P2.
+
+### Design decisions locked in Batch 6
+- **cwd over UUID**: session-id namespaces don't align; same-cwd dual-fakechat is accepted as last-writer-wins (rare in practice).
+- **statusline snapshots are ephemeral**: in-memory only, never persisted to SQLite. On claudegram restart, the next statusline POST (within ~2s) repopulates.
+- **Loopback-only for `/internal/statusline`**: no auth header needed pre-P4 because the statusline script is co-located with claudegram. CF Access would add a second layer if the service ever goes remote.
+- **Optional `cwdRegistry` in deps**: chosen over mass-editing ~20 test harnesses. Runtime always provides one via `createServer`; tests that don't exercise `/internal/statusline` get the no-op fallback.
+
+### Tests added in Batch 6
+- `src/ws/cwd-registry.test.ts` — 6 tests
+- `src/routes/statusline.test.ts` — 8 tests
+- Total: **340 pass / 1 skip / 0 fail** after Batch 6 (was 327).
+
+---
+
+## Batch 7 — Message UI niceties: markdown, typing indicator, assistant label (pending commit)
+
+**Scope**: three visual upgrades to the message pane. One coder pass.
+
+### Gap that triggered this batch
+User asked for three things in one message after Batch 6: (1) render markdown in Claude's replies — currently every message is plain escaped text, so code blocks look cramped and lists don't indent; (2) show a "waiting for AI" affordance between the user's send and the next assistant message; (3) replace the "them" label in message bubbles with something branded.
+
+### FIX A — Safe markdown renderer
+- `current/claudegram/web/js/markdown.js` (new): zero-dependency, zero-build-step renderer. Hand-rolled to respect the project's "vanilla ES modules, no framework, no build step" constraint. Supported constructs: fenced code blocks (``` ``` ``` ``` with optional language label → `data-lang`), inline code, `**bold**` / `__bold__`, `*italic*` / `_italic_` with word-boundary anchors so `snake_case` isn't eaten, `[text](url)` links with strict URL allowlist (`http(s)://`, `mailto:`, same-origin `/`, `#anchor`, `./relative`), `-` / `*` / `+` unordered lists, `1.` ordered lists, `#`–`######` ATX headings, blank-line paragraph separation, soft line breaks as `<br>`.
+- Safety contract: fenced code is extracted to placeholders BEFORE HTML escape; all other text is HTML-escaped, THEN inline transforms run, so the only HTML tags in the output are the ones we emit ourselves. `javascript:` / `data:` URLs are dropped (visible text is kept without the `<a>`).
+- `current/claudegram/src/web/markdown.test.ts` (new): 14 unit tests covering empty / non-string inputs, XSS escape (`<script>`), bold/italic/inline-code together, code-block language attributes, code-block content escape, UL + OL, headings with level-specific classes, allowlisted links (rel/target/href), `javascript:` stripping, relative / fragment / `./` URLs, soft line breaks, paragraph separation, `snake_case` preservation, mixed inline code + bold.
+- `current/claudegram/web/js/render.js`: assistant messages now run through `renderMarkdown(raw)`; user messages stay on `escapeHtml(raw)` (users type plaintext — we shouldn't auto-format their input).
+- `current/claudegram/web/style.css`: `.md-p`, `.md-h*`, `.md-list`, `.md-inline-code`, `.md-code`, `.md-link` styles. Dark user bubbles get lighter-on-dark variants for `<code>` and `<a>` so they stay legible against Mistral Black.
+
+### FIX B — "Claude is thinking" typing indicator
+- `current/claudegram/web/js/store.js`: new `waitingBySession: Map<sessionId, boolean>` field on state.
+  - `applyPendingMessage(sessionId, message)` sets `waiting=true` when the optimistic-echo message has `direction === 'user'`.
+  - `applyLiveMessage(sessionId, message)` clears the flag when an assistant message arrives for that session.
+  - `markPendingFailed(clientMsgId, reason)` clears the flag on failed sends — no perpetual bubble behind a delivery failure.
+  - `applySessionDeleted(sessionId)` also clears it.
+- `current/claudegram/web/js/render.js`: `renderMessages()` appends a `<li class="msg-waiting" data-from="assistant" data-state="waiting">` at the tail of the active session's message list when `waitingBySession.get(activeId) === true`. The indicator contains three `<span class="dot">` children animating via `@keyframes typing-bounce` (0.15s stagger).
+- `current/claudegram/web/style.css`: `.typing-dots` layout + `@keyframes typing-bounce` (1.15s ease-in-out loop, translateY(-0.3em) + opacity pulse). Honours `@media (prefers-reduced-motion: reduce)` — animation disabled; dots stay visible at 0.6 opacity so the indicator is still legible.
+- Ephemeral by design: waiting state lives in the browser tab only. A page refresh clears it; user can re-send if needed. Rejected alternative: server-side "pending assistant reply" state would need a timeout, a cleanup path, and its own broadcast type — too much surface for a cosmetic indicator.
+
+### FIX C — Assistant label rename
+- `current/claudegram/web/js/render.js`: new `ASSISTANT_LABEL = 'Claude'` module constant; used in both regular message bubbles and the typing indicator. Replaces the former inline `'them'` literal at line 159. No CSS changes required — the label was text-only.
+
+### Design decisions locked in Batch 7
+- **Markdown only for assistant messages**: rendering user-typed markdown would surprise the user (asterisks in a quoted snippet suddenly turning bold). Asymmetric by design.
+- **URL allowlist over sanitiser library**: same reason as the markdown impl itself — no build step, and the threat model (Claude emitting `javascript:alert(1)`) is small enough for a hand-rolled check.
+- **"Claude" not "Claude Code" / "them" / a nickname**: short, on-brand, unambiguous.
+- **Waiting state is client-only**: matches the ephemeral-indicator convention used for `pending` / `failed` opacity already.
+
+### Tests added in Batch 7
+- `src/web/markdown.test.ts` — 14 tests (imports the `.js` module directly; Bun resolves).
+- Total: **354 pass / 1 skip / 0 fail** after Batch 7.
+
+### README changes (both batches)
+`current/claudegram/README.md` gained two new sections inserted before "Quick start":
+- **Live statusline in the compose row (optional)** — explains the bridge chain, setup via `CLAUDEGRAM_STATUSLINE_URL`, multi-session behaviour, and edge cases.
+- **Message UI niceties** — describes markdown scope + safety posture, the typing indicator's ephemeral semantics, and the assistant label.
+Plus a standalone section **Unread count now clears across refreshes** explaining the root cause + fix for future readers.
+
+---
+
+## Batch 8 — Three regressions surfaced during user smoke test (pending commit)
+
+**Scope**: three bugs the user reported immediately after Batches 6–7 landed. One diagnostic pass, three independent fixes, one archive update.
+
+### Reports from the user (verbatim):
+1. "为什么我的 session 突然多了两个不应该存在的东西：01KPJE8JFWTN2GPEMFCTB9FB7C、01KPJE7M8N223G8WG41RJP0K2Y"
+2. "更新 session 名称后，无法保持么？我之前更新了一个 session name 但是不知道为啥它没了"
+3. "'模型名 + ctx + 5h + 7d 四件套一行紧凑显示'这个完全没有显示，而且移动端的优化也完全没有出现效果"
+
+### Diagnosis
+
+**Report 1 (ghost sessions)** — each ULID traced back to a distinct `~/.claude/channels/fakechat/pid-<N>/session_id` file:
+```
+pid-6744/session_id : 01KPJE7M8N223G8WG41RJP0K2Y
+pid-6837/session_id : 01KPJE8JFWTN2GPEMFCTB9FB7C
+```
+Root cause: `fakechat/server.ts` scopes STATE_DIR by `CLAUDE_SESSION_ID ?? pid-${pid}`. Claude Code does not propagate `CLAUDE_SESSION_ID` to MCP subprocesses (verified in Batch 6), so every fakechat restart = new pid = new STATE_DIR = new ULID = new claudegram session row. Two restarts during the testing window = two ghost sessions.
+
+**Report 2 (rename lost)** — DB inspection showed one renamed session (`"hi"`) survived only because its fakechat hadn't re-registered since the rename. Read of `stmtUpsert` in `sqlite.ts:165–171` confirmed `ON CONFLICT(id) DO UPDATE SET … name = excluded.name` — every fakechat reconnect overwrites the user's PATCH rename with `session_name ?? session_id` (and fakechat never sends session_name, so the fallback is the ULID itself).
+
+**Report 3 (statusline + mobile CSS missing)** — `web/sw.js:1` read `const VERSION = 'v1-mistral-status-bar'` (unchanged since Batch 3). The service worker cache holds the pre-Batch-6 shell; new index.html (with `.statusline` div), new style.css (with mobile breakpoints), new render.js (with markdown + statusline render), and the entirely new `markdown.js` module were all invisible behind the stale cache. Additionally `markdown.js` was not listed in `SHELL`, so even a version bump would have left it uncached.
+
+### FIX 1 — `stmtUpsert` no longer touches `name` on conflict
+- `current/claudegram/src/repo/sqlite.ts` — `stmtUpsert` body is now `ON CONFLICT(id) DO UPDATE SET last_seen_at = excluded.last_seen_at`. Comment captures the rationale (fakechat sends `session_name: undefined` → fallback clobbers renames). Names are set once at INSERT; changes go exclusively through `stmtRename`.
+- `current/claudegram/src/repo/sqlite.test.ts`:
+  - Test 15 rewritten: "second upsert updates last_seen_at but preserves original name" — asserts the new contract.
+  - New Test 15b: `rename` → `upsert` (simulating fakechat reconnect) — asserts the renamed name survives. This is the exact user-reported scenario.
+
+### FIX 2 — Service-worker cache version bump + markdown.js in shell
+- `current/claudegram/web/sw.js`:
+  - `VERSION: 'v1-mistral-status-bar'` → `'v2-statusline-md'`.
+  - `SHELL` extended with `/web/js/markdown.js`.
+  - Added a comment at the top stating the convention ("bump VERSION whenever any SHELL file changes") so the next dev doesn't repeat the omission.
+- Activation behaviour was already correct: `activate` handler deletes all caches except `VERSION`, and `skipWaiting` + `clients.claim` make the next navigation pick up new assets. The bug was purely the stale version string.
+
+### FIX 3 — Fakechat STATE_DIR scope now hashed by cwd
+- `current/fakechat/server.ts`:
+  - New helper `cwdSlug(cwd)` = first 16 hex chars of `sha256(cwd)`.
+  - New `defaultSessionScope()` returns `cwd-<slug>`; falls back to `pid-${pid}` only if `process.cwd()` throws (shouldn't happen outside a destroyed working directory).
+  - `SESSION_SCOPE = process.env.CLAUDE_SESSION_ID ?? defaultSessionScope()`.
+- Result: one project directory → one stable ULID across Claude Code restarts. No more ghost accumulation. `CLAUDE_SESSION_ID` still takes priority for explicit overrides.
+- Migration: existing `pid-*` STATE_DIRs continue to exist but are no longer consulted — a fresh `cwd-*` directory is created on first boot. Old ghost sessions in claudegram remain in DB until manually deleted via the UI.
+
+### Validation
+- claudegram: **355 pass / 1 skip / 0 fail** (was 354 — Test 15b added).
+- fakechat: **48 pass / 0 fail**.
+- `bun tsc --noEmit` clean in both packages.
+
+### Design decisions locked in Batch 8
+- **Upsert treats name as insert-only.** A dedicated rename path (`stmtRename` + PATCH endpoint) is the only legit way to change a session name. If fakechat ever needs to push a server-side name (e.g. "Claude in /my/project"), we'll add an explicit optional signal, not overload upsert.
+- **SW version bump is a per-release ritual.** Added a comment at the top of `sw.js` so the convention is obvious. Future Batch-N changes touching any SHELL file must bump VERSION in the same commit.
+- **cwd is the primary project-identity signal.** Batch 6 already used it for statusline bridging; now the fakechat session identity itself derives from it. `CLAUDE_SESSION_ID` remains the override for users who want to bind multiple cwds to one session or split one cwd into many.
+
+### User-side follow-ups (NOT code changes)
+After deploying these fixes the user needs to:
+1. **Restart Claude Code** so fakechat picks up the new `cwd-<slug>` STATE_DIR and sends the register frame with `cwd`.
+2. **Hard-refresh the PWA** (or close and reopen the tab) to pick up the new service worker. `v2-statusline-md` activates on the next navigation; existing tabs stay on v1 until reload.
+3. **`export CLAUDEGRAM_STATUSLINE_URL=http://127.0.0.1:8788/internal/statusline`** in the shell that launches Claude Code — the bridge POST is opt-in (Batch 6).
+4. **Manually delete the ghost sessions** via the × button in the sidebar.
 
 ---
 

@@ -4,12 +4,14 @@ import type { MessageRepo, SessionRepo } from './repo/types.js';
 import type { Database } from './db/client.js';
 import type { Hub } from './ws/hub.js';
 import type { SessionRegistry } from './ws/session-registry.js';
+import { InMemoryCwdRegistry, type CwdRegistry } from './ws/cwd-registry.js';
 import { handleHealth } from './routes/health.js';
 import { handleIngest } from './routes/ingest.js';
 import { handleApiSessions, handleApiSessionDelete, handleApiSessionPatch } from './routes/api/sessions.js';
 import { handleApiMessages } from './routes/api/messages.js';
 import { handleApiMe } from './routes/api/me.js';
 import { handleRoot, handleWebAsset, serveStaticFile } from './routes/static.js';
+import { handleStatuslinePost } from './routes/statusline.js';
 
 export interface RouterCtx {
   readonly msgRepo: MessageRepo;
@@ -20,6 +22,11 @@ export interface RouterCtx {
   readonly config: Config;
   readonly webRoot: string;
   readonly sessionRegistry: SessionRegistry;
+  /**
+   * In-memory cwd → session_id map. Optional for test harnesses that don't
+   * exercise /internal/statusline; `createServer` always provides one at runtime.
+   */
+  readonly cwdRegistry?: CwdRegistry;
 }
 
 export function jsonResponse(status: number, body: unknown): Response {
@@ -53,6 +60,16 @@ export async function dispatch(req: Request, ctx: RouterCtx): Promise<Response> 
   // Route: /ingest (POST only; all other methods → 405 via handleIngest)
   if (path === '/ingest') {
     return handleIngest(req, ctx);
+  }
+
+  // Route: /internal/statusline — loopback-only, receives Claude Code
+  // statusline JSON and broadcasts to connected PWAs.
+  if (path === '/internal/statusline') {
+    return handleStatuslinePost(req, {
+      hub: ctx.hub,
+      cwdRegistry: ctx.cwdRegistry ?? new InMemoryCwdRegistry(),
+      logger: ctx.logger,
+    });
   }
 
   // API routes

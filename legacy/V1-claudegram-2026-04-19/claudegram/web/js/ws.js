@@ -74,6 +74,8 @@ export function createWsClient(url) {
         emit('session_update', { session: data.session });
       } else if (data && data.type === 'session_deleted') {
         emit('session_deleted', { session_id: data.session_id });
+      } else if (data && data.type === 'statusline') {
+        emit('statusline', { session_id: data.session_id, statusline: data.statusline });
       } else if (data && data.type === 'error') {
         emit('error', data);
       }

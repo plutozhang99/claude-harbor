@@ -162,12 +162,16 @@ export class SqliteSessionRepo implements SessionRepo {
   private readonly stmtRename: ReturnType<Database['prepare']>;
 
   constructor(private readonly db: Database) {
+    // ON CONFLICT intentionally does NOT overwrite `name`. fakechat's default
+    // register frame omits session_name (sends `undefined`), so the name would
+    // otherwise fall back to session_id (the ULID) on every reconnect and
+    // clobber any user-driven rename via PATCH /api/sessions/:id. Names are
+    // set once at INSERT time; rename goes through `stmtRename` exclusively.
     this.stmtUpsert = db.prepare(
       `INSERT INTO sessions (id, name, first_seen_at, last_seen_at)
        VALUES (?,?,?,?)
        ON CONFLICT(id) DO UPDATE SET
-         last_seen_at = excluded.last_seen_at,
-         name = excluded.name`
+         last_seen_at = excluded.last_seen_at`
     );
 
     this.stmtFindById = db.prepare(

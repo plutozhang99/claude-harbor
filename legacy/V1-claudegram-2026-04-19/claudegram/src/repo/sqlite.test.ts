@@ -215,15 +215,30 @@ describe('SqliteSessionRepo', () => {
     expect(sess!.last_seen_at).toBe(5000);
   });
 
-  // Test 15: upsert again with later now and different name → first_seen_at unchanged, last_seen_at updated, name updated
-  it('second upsert updates last_seen_at and name but not first_seen_at', () => {
+  // Test 15: second upsert updates last_seen_at but preserves the original
+  // name and first_seen_at. Name-preservation is load-bearing for renames —
+  // see `stmtUpsert` comment in sqlite.ts for rationale.
+  it('second upsert updates last_seen_at but preserves original name', () => {
     sessRepo.upsert({ id: 'sess1', name: 'Original', now: 1000 });
-    sessRepo.upsert({ id: 'sess1', name: 'Updated', now: 9999 });
+    sessRepo.upsert({ id: 'sess1', name: 'Attempted-Overwrite', now: 9999 });
     const sess = sessRepo.findById('sess1');
     expect(sess).not.toBeNull();
     expect(sess!.first_seen_at).toBe(1000);
     expect(sess!.last_seen_at).toBe(9999);
-    expect(sess!.name).toBe('Updated');
+    expect(sess!.name).toBe('Original');
+  });
+
+  // Test 15b: rename survives a subsequent upsert (the real-world case —
+  // user renames via PATCH, then fakechat reconnects and re-registers).
+  it('rename then upsert: name stays at the renamed value', () => {
+    sessRepo.upsert({ id: 'sess1', name: 'sess1', now: 1000 });
+    const renamed = sessRepo.rename('sess1', 'My Project');
+    expect(renamed).toBe(true);
+    // Simulate fakechat reconnect — default register frame falls back name=id.
+    sessRepo.upsert({ id: 'sess1', name: 'sess1', now: 2000 });
+    const sess = sessRepo.findById('sess1');
+    expect(sess!.name).toBe('My Project');
+    expect(sess!.last_seen_at).toBe(2000);
   });
 
   // Test 16: findById for unknown id → returns null

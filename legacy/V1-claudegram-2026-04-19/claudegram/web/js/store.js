@@ -22,6 +22,15 @@ export function createStore() {
     sessions: new Map(),
     messagesBySession: new Map(),
     hasMoreBySession: new Map(),
+    statuslineBySession: new Map(),
+    /**
+     * Per-session "Claude is thinking" flag. Set when the user sends a
+     * reply (optimistic echo lands); cleared when the next assistant
+     * message for that session arrives. Ephemeral — does not persist
+     * across page refreshes.
+     * @type {Map<string, boolean>}
+     */
+    waitingBySession: new Map(),
     activeId: null,
   };
 
@@ -89,6 +98,12 @@ export function createStore() {
       state.messagesBySession.set(sessionId, [...prev, message]);
     }
 
+    // Clear the "Claude is thinking" indicator when an assistant reply arrives.
+    if (message.direction !== 'user' && state.waitingBySession.get(sessionId) === true) {
+      state.waitingBySession = new Map(state.waitingBySession);
+      state.waitingBySession.delete(sessionId);
+    }
+
     // Bump unread count if not the active session (only for assistant messages,
     // since the user originated this message themselves).
     if (sessionId !== state.activeId && message.direction !== 'user') {
@@ -126,9 +141,25 @@ export function createStore() {
   function applySessionDeleted(sessionId) {
     state.sessions = new Map(state.sessions);
     state.sessions.delete(sessionId);
+    state.statuslineBySession = new Map(state.statuslineBySession);
+    state.statuslineBySession.delete(sessionId);
+    state.waitingBySession = new Map(state.waitingBySession);
+    state.waitingBySession.delete(sessionId);
     if (state.activeId === sessionId) {
       state.activeId = null;
     }
+    emit('change');
+  }
+
+  /**
+   * Apply a live statusline snapshot for a session. Source: Claude Code's
+   * statusline script → claudegram /internal/statusline → hub broadcast.
+   * @param {string} sessionId
+   * @param {{model: string|null, ctx_pct: number|null, five_h_pct: number|null, seven_d_pct: number|null, seven_d_reset_at: string|null}} snapshot
+   */
+  function applyStatusline(sessionId, snapshot) {
+    state.statuslineBySession = new Map(state.statuslineBySession);
+    state.statuslineBySession.set(sessionId, { ...snapshot, updated_at: Date.now() });
     emit('change');
   }
 
@@ -145,6 +176,14 @@ export function createStore() {
     const prev = state.messagesBySession.get(sessionId);
     state.messagesBySession = new Map(state.messagesBySession);
     state.messagesBySession.set(sessionId, [...prev, message]);
+
+    // Flip on the "Claude is thinking" indicator for this session — a user
+    // just hit send and is now waiting for a reply.
+    if (message && message.direction === 'user') {
+      state.waitingBySession = new Map(state.waitingBySession);
+      state.waitingBySession.set(sessionId, true);
+    }
+
     emit('change');
   }
 
@@ -166,6 +205,13 @@ export function createStore() {
         changed = true;
       }
       state.messagesBySession.set(sid, copy);
+
+      // Delivery failed — drop the waiting indicator so the UI doesn't show
+      // a perpetual "Claude is thinking" bubble behind a failed send.
+      if (state.waitingBySession.get(sid) === true) {
+        state.waitingBySession = new Map(state.waitingBySession);
+        state.waitingBySession.delete(sid);
+      }
     }
     if (changed) emit('change');
   }
@@ -197,6 +243,7 @@ export function createStore() {
     applySessionDeleted,
     applyPendingMessage,
     markPendingFailed,
+    applyStatusline,
     hydrateMessages,
   };
 }

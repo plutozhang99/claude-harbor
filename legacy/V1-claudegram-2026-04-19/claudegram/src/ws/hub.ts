@@ -6,10 +6,20 @@ export interface UserSocketData {
   readonly kind: 'user-socket';
 }
 
+/** Statusline snapshot forwarded from Claude Code's statusline script. */
+export interface StatuslineSnapshot {
+  readonly model: string | null;
+  readonly ctx_pct: number | null;
+  readonly five_h_pct: number | null;
+  readonly seven_d_pct: number | null;
+  readonly seven_d_reset_at: string | null;
+}
+
 export type BroadcastPayload =
   | { readonly type: 'message'; readonly session_id: string; readonly message: Message }
   | { readonly type: 'session_update'; readonly session: Session & { readonly connected?: boolean; readonly deleted?: boolean } }
-  | { readonly type: 'session_deleted'; readonly session_id: string };
+  | { readonly type: 'session_deleted'; readonly session_id: string }
+  | { readonly type: 'statusline'; readonly session_id: string; readonly statusline: StatuslineSnapshot };
 
 export type TryAddResult = { readonly ok: true } | { readonly ok: false; readonly reason: 'cap_exceeded' };
 
