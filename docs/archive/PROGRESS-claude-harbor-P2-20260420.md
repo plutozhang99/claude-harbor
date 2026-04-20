@@ -100,6 +100,21 @@ YES — `docs/DESIGN.md` (Mistral warm palette). All UI work in P2 MUST follow i
 - Update README with P2 dev workflow.
 
 ## What's Done
+- [x] **P2.5** Build integration + E2E smoke — commit `e6e51ef` — ts ✅ sec ✅ func ✅
+  - `scripts/build-frontend.sh` (flutter pub get + build web --release), `scripts/dev.sh` (build + run server w/ HARBOR_* env passthrough, `--skip-build` flag).
+  - Server static fallthrough fix: `API_PATH_PREFIXES` list narrows SPA fallthrough so `/hooks/*`, `/admin/*`, `/channel/*`, `/subscribe`, `/statusline`, `/health`, `/api/*` return true 404 instead of `index.html`. Pre-existing latent bug — prior tests ran without a real build/web/ dir.
+  - `HARBOR_FRONTEND_ROOT` env override in `http-static.ts` w/ trim + absolute-path validation (throws at boot on relative/whitespace). Warn-level log when explicit override points at missing build, info-level when default path.
+  - `test/server.p2-e2e.test.ts` end-to-end suite using Bun's native WebSocket: static headers (CSP + nosniff), MIME map, SPA fallthrough, API non-fallthrough including `/hooks/*` + `/admin/*` + exact-boundary `/subscribe-fake`, full WS round-trip (session-start → session.created replay → user-prompt-submit → message.created → /channel/reply → message.created), `HARBOR_FRONTEND_ROOT` env override.
+  - READMEs: root gets Getting Started (P2) + Security notes (HARBOR_FRONTEND_ROOT footgun, --dart-define token bundle embedding, reverse-proxy for non-loopback). Server README gets Frontend integration section. Frontend README new — dev workflow + bundle-embedding warning.
+  - 150 server tests (147 + 3 new), 96 frontend tests unchanged. `bun tsc` clean, `flutter analyze` clean.
+- [x] **P2.4** Session detail screen — commit `6ea544e` — flutter ✅ sec ✅ func ✅
+  - `SessionDetailScreen` responsive at 960: wide = Row(Chat + Metadata 360), narrow = Column(MetadataCollapsed + Chat). Skeleton loading body, RETRY invalidation.
+  - `ChatPane` (reverse ListView, inbound right/kCream, outbound left/kWarmIvory+kMistralOrange left border, SelectableText, 80% max-width, auto-scroll gated on actual list change, timestamp label only on >60 s gap). `SessionListScreen.onTap` now opens real detail.
+  - `ComposeBox` w/ `Focus(onKeyEvent:)` for Cmd/Ctrl+Enter (no stray newline), SEND via `ValueListenableBuilder`, disabled on ended/unbound/empty, `_TokenCache` per-session, 401 → rotate+retry, static error strings + `dart:developer.log` for raw errors.
+  - `MetadataPane` (PROJECT / MODEL / CONTEXT ring / LIMITS / COST / STATUS with `SectionLabel` + `kInputBorder` dividers). `MetadataCollapsed` sheet body is a `Consumer` watching `sessionDetailProvider` so live updates render while sheet is open.
+  - Data: `MessageRepository.watchMessages/loadOlder`, `messagesProvider` = `StreamProvider.autoDispose.family` wired to `disposeSession` (no feed leak). `HarborApiClient.adminFetchChannelToken` (structured URI). `harborAdminTokenProvider` documented as loopback-only.
+  - `session_detail_placeholder.dart` retired.
+  - 96 tests pass, `flutter analyze` clean. DESIGN.md compliance verified.
 - [x] **P2.3** Session list screen — commit `73b4430` — flutter ✅ func ✅
   - `SessionListScreen` (ConsumerWidget) with loading (SkeletonList), error (RETRY invalidates + awaits `.future`), empty ("NO ACTIVE SESSIONS" + Courier command hint), data (RefreshIndicator + ListView.separated). Responsive 16/32/64 padding, max-width 960. AppBar "HARBOR".
   - `SessionTile` (StatelessWidget): project basename (`path.basename` w/ em-dash fallback on empty sessionId), model display, 12×12 zero-radius status dot (active/idle/ended/unbound palette) w/ Tooltip + Semantics for non-color indicator, context bar (kCream track + kMistralOrange fill, clamped 0..100), 5h/7d row from `session.rateLimits`, Courier cost (shows $0.00, hides on null). InkWell w/ `overlayColor` WidgetStateProperty (kCream hover/pressed/focused) and `customBorder` zero-radius so ink clips sharp. `ConstrainedBox minHeight: 72` for ≥48dp tap target. `Semantics(button: true)` + `MergeSemantics` content.
@@ -130,8 +145,8 @@ YES — `docs/DESIGN.md` (Mistral warm palette). All UI work in P2 MUST follow i
   - Tests: 139 pass / 0 fail, tsc clean. Round-1 security BLOCK on C1 (channel_token leak) closed in round-2.
 
 ## Next Steps
-- [ ] **P2.4** Session detail screen (two-pane responsive chat + metadata)
-- [ ] **P2.5** Build integration + smoke test
+- **P2 complete.** Archiving this PROGRESS.md as `docs/archive/PROGRESS-claude-harbor-P2-20260420.md`.
+- **P3** (Web Push via VAPID) is the next phase — kick off a fresh PROGRESS.md when the user starts it.
 - [ ] **P2.2** Data layer (models, REST, WS subscribe)
 - [ ] **P2.3** Session list screen
 - [ ] **P2.4** Session detail screen
