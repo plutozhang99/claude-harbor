@@ -2,7 +2,7 @@
 
 A remote aggregator that displays multiple live Claude Code (CC) sessions on a mobile-first PWA with push notifications (P3). Designed to run on a machine separate from the ones running CC.
 
-> 该项目因与 Claude Code 的 remote-control 功能重叠而终止。详情请参考https://code.claude.com/docs/en/remote-control
+> This project has been discontinued due to overlapping functionality with Claude Code's remote-control feature. For more details, see https://code.claude.com/docs/en/remote-control
 
 Three packages, one repo:
 
