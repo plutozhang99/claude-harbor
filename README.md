@@ -18,6 +18,25 @@ language.
 
 ---
 
+## Quick Start
+
+```bash
+# 1. Start server (frontend already built — skip Flutter rebuild)
+./scripts/dev.sh --skip-build
+# → open http://127.0.0.1:7823/ in a browser
+
+# 2. Wire up Claude Code on this machine
+HARBOR_URL=http://127.0.0.1:7823 \
+  current/claude-harbor-client/install.sh
+
+# 3. Launch a monitored CC session
+claude-harbor start
+```
+
+That's it. The browser dashboard live-updates as Claude Code sessions run.
+
+---
+
 ## Getting Started (P2)
 
 ### Prerequisites
@@ -39,13 +58,24 @@ language.
 ./scripts/dev.sh --skip-build
 ```
 
-Defaults:
+### Environment variables
 
-- Port `7823`, bind `127.0.0.1` (loopback only — see PLAN §12).
-- Override with `HARBOR_PORT` / `HARBOR_BIND`. Non-loopback binds refuse
-  to start unless `HARBOR_ADMIN_TOKEN` is set (escape hatch:
-  `HARBOR_ALLOW_UNSAFE_BIND=1`).
-- Bundle location override: `HARBOR_FRONTEND_ROOT=/abs/path/to/build/web`.
+| Variable | Default | Description |
+|---|---|---|
+| `HARBOR_PORT` | `7823` | TCP port to listen on |
+| `HARBOR_BIND` | `127.0.0.1` | Bind address. Set `0.0.0.0` to expose on all interfaces (LAN access) |
+| `HARBOR_ADMIN_TOKEN` | _(none)_ | Required when `HARBOR_BIND` is non-loopback. Any string works |
+| `HARBOR_ALLOW_UNSAFE_BIND` | _(none)_ | Set `1` to skip the admin token requirement on non-loopback binds |
+| `HARBOR_DB_PATH` | `./data/harbor.db` | SQLite database file path |
+| `HARBOR_FRONTEND_ROOT` | `build/web/` | Override path to Flutter static bundle |
+| `HARBOR_DEV` | _(none)_ | Set `1` to enable permissive GET CORS (loopback only, for `flutter run -d chrome`) |
+| `HARBOR_CORR_WINDOW_MS` | `10000` | Correlation window in ms for matching hooks to sessions |
+
+**LAN example:**
+```bash
+HARBOR_BIND=0.0.0.0 HARBOR_ADMIN_TOKEN=mysecret ./scripts/dev.sh --skip-build
+# → http://<your-lan-ip>:7823/
+```
 
 Once the server is up, open `http://127.0.0.1:7823/` in a browser. The
 session list loads over REST and live-updates via `WS /subscribe`.
@@ -64,8 +94,7 @@ On each machine that runs CC:
 ```bash
 # Install hooks + statusline + MCP channel into ~/.claude/settings.json.
 # Points the client at your running server.
-HARBOR_URL=http://127.0.0.1:7823 \
-  current/claude-harbor-client/install.sh
+./current/claude-harbor-client/install.sh
 
 # Launch a wrapped CC session.
 claude-harbor start

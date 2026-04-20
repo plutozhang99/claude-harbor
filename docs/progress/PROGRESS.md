@@ -27,11 +27,28 @@
 - Functional Coverage: functional-coverage (rebuild + console clean + app renders)
 
 ## What's Done
-- [x] T1+T2+T3: `scripts/build-frontend.sh` now passes `--no-web-resources-cdn`; rebuild produces local `build/web/canvaskit/{canvaskit.js,canvaskit.wasm}` (7.1 MB wasm). `flutter_bootstrap.js` has `"useLocalCanvasKit":true`; gstatic URL is a dead ternary branch (no runtime fetch). `fontFamily: 'Arial'` was already in `lib/theme/mistral_theme.dart:256` and propagates cleanly through theme. — code ✅ sec ✅ func ✅ — commit [pending]
+- [x] T1+T2+T3: `scripts/build-frontend.sh` now passes `--no-web-resources-cdn`; rebuild produces local `build/web/canvaskit/{canvaskit.js,canvaskit.wasm}` (7.1 MB wasm). `flutter_bootstrap.js` has `"useLocalCanvasKit":true`; gstatic URL is a dead ternary branch (no runtime fetch). `fontFamily: 'Arial'` was already in `lib/theme/mistral_theme.dart:256` and propagates cleanly through theme. — code ✅ sec ✅ func ✅ — commit 154e0a8
 - [x] T4+T5: Reviews done. Server runtime verified: `GET /` → 200 + strict CSP; `GET /canvaskit/canvaskit.wasm` → 200 `application/wasm`.
 
+## What's Done (cont.)
+- [x] F1: Bundled Noto Sans SC (16 MB) + Noto Emoji mono (~409 KB) as local assets; registered via pubspec.yaml; wired `fontFamilyFallback: ['NotoSansSC', 'NotoEmoji']` in `mistral_theme.dart:257` after `fontFamily: 'Arial'`. Build produces `build/web/assets/assets/fonts/{NotoSansSC-Regular.otf, NotoEmoji-Regular.ttf}`; Bun serves 200 + exact content-length. CSP unchanged. — code ✅ sec ✅ func ✅ — commit 96d656a
+
+## What's Done (cont.)
+- [x] F1.5: Register Roboto locally (`assets/fonts/Roboto-Regular.ttf`, 515 KB from googlefonts/roboto) to satisfy Flutter engine init's hardcoded Roboto fetch (runs BEFORE ThemeData applies, so `fontFamily: 'Arial'` can't suppress it). Fix `HarborApiClient._resolve` double-slash when `base.path == '/'` → `/sessions` requests no longer fall through to SPA → app now reaches the harbor API correctly. — code ✅ sec ✅ func ✅ — commit 6fcb39c
+
+## Notes / Gotchas (cont.)
+- Flutter Web's engine has a built-in Roboto registration that runs at init, independent of ThemeData. Only way to stop the gstatic fetch is to have `Roboto` listed in FontManifest (via pubspec asset). Arial-as-theme-default alone is insufficient.
+- `HEAD /sessions` still falls through to SPA (separate minor server routing bug — real clients use GET and are unaffected). Can be filed as a separate ticket.
+- Residual: `fontFallbackBaseUrl` default in `main.dart.js` is still `fonts.gstatic.com/s/` for glyphs outside all registered families — covered by F2 scope.
+
 ## Next Steps
-- [ ] F1 (follow-up, needs user decision): Flutter's fontFallbackManager still embeds `https://fonts.gstatic.com/s/` for missing-glyph fallback (CJK/emoji/extended Latin). With strict CSP this will render tofu for non-Latin user content. Options: (a) bundle local Noto fallback font(s); (b) allowlist `fonts.gstatic.com` in CSP font-src/connect-src (breaks internal-net posture); (c) accept Latin-only rendering.
+- [ ] F2 (follow-up, needs user decision — "遇到再说"): Remaining glyph gaps that will still tofu under strict CSP:
+  - **Japanese/Korean kana/hangul** — Noto Sans SC does not cover U+3040–U+30FF (Hiragana/Katakana) or U+AC00–U+D7AF (Hangul). Add NotoSansJP + NotoSansKR (~10 MB each) if in scope.
+  - **Color emoji** — currently monochrome line-style. Swap to NotoColorEmoji (~10 MB) if design requires color.
+  - **Math symbols (U+2200–U+22FF, U+1D400+)** — LaTeX-rendered math by Claude will miss. Add Noto Sans Math (~450 KB) if in scope.
+  - **Newest Unicode emoji** (post-v2.034 additions, e.g. U+1FAE8 shaking face) — tofu.
+  - **Regional flag sequences (U+1F1E6+)** — NotoEmoji mono lacks flag glyphs.
+- [ ] Optional hardening (non-blocking): (a) Subset NotoSansSC to observed codepoints via `pyftsubset` (~2-4 MB → ~10 MB saved); (b) pin CJK source to a tagged release + add `assets/fonts/CHECKSUMS.txt`; (c) add server test asserting CSP header + static `/canvaskit/canvaskit.wasm` serve; (d) add `flutter --version` guard in `build-frontend.sh` for Flutter 3.24+.
 
 ## Notes / Gotchas
 - `lockdown-install.js` SES warnings are from browser extensions (MetaMask/etc) — not our code. Ignore.
