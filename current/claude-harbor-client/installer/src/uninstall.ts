@@ -34,6 +34,9 @@ export interface UninstallOptions {
 
 export interface UninstallResult {
   readonly code: number;
+  /** Harbor URL recorded in the sidecar, surfaced so callers can POST
+   *  a best-effort `account_hint: null` clear to the server. */
+  readonly harborUrl?: string;
 }
 
 const DEFAULT_STDOUT = (m: string): void => {
@@ -164,7 +167,7 @@ export function runUninstall(opts: UninstallOptions): UninstallResult {
   if (dryRun) {
     stdout("--- settings.json (post-uninstall) ---");
     stdout(JSON.stringify(next, null, 2));
-    return { code: 0 };
+    return { code: 0, harborUrl: sidecarValue.harbor_url };
   }
 
   // (5) Write.
@@ -183,5 +186,5 @@ export function runUninstall(opts: UninstallOptions): UninstallResult {
   }
   stdout(`  wrote: ${settings}`);
   stdout(`  removed sidecar: ${sidecar}`);
-  return { code: 0 };
+  return { code: 0, harborUrl: sidecarValue.harbor_url };
 }

@@ -17,7 +17,7 @@ export interface ParsedArgs {
   readonly unknown: readonly string[];
 }
 
-const KNOWN_STRING_FLAGS = new Set(["--harbor-url", "--home"]);
+const KNOWN_STRING_FLAGS = new Set(["--harbor-url", "--home", "--account-hint"]);
 const KNOWN_BOOL_FLAGS = new Set(["--dry-run"]);
 const ALL_KNOWN = new Set([
   ...KNOWN_STRING_FLAGS,

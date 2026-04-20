@@ -54,6 +54,9 @@ export interface InstallOptions {
 
 export interface InstallResult {
   readonly code: number;
+  /** Present on successful non-dry-run installs — the resolved harbor URL
+   *  the caller should POST follow-up admin events to (e.g. account_hint). */
+  readonly harborUrl?: string;
 }
 
 /**
@@ -314,7 +317,7 @@ export function runInstall(opts: InstallOptions): InstallResult {
     stdout(JSON.stringify(next, null, 2));
     stdout("--- sidecar (would-write) ---");
     stdout(JSON.stringify(sidecarValue, null, 2));
-    return { code: 0 };
+    return { code: 0, harborUrl };
   }
 
   // (6) Write atomically.
@@ -323,5 +326,5 @@ export function runInstall(opts: InstallOptions): InstallResult {
   stdout(`  wrote: ${settings}`);
   stdout(`  wrote sidecar: ${sidecar}`);
   stdout(`  harbor URL (runtime): ${harborUrl}`);
-  return { code: 0 };
+  return { code: 0, harborUrl };
 }

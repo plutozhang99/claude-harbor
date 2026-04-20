@@ -105,9 +105,13 @@ export class Db {
     pid: number;
     started_at: number;
   }): SessionRow {
+    // Copy install_meta.account_hint (if any) into the new session row at
+    // creation time. Once persisted on the session row, subsequent changes
+    // to install_meta do NOT mutate it — prior-session history is immutable.
+    const accountHint = this.getAccountHint();
     const stmt = this.raw.prepare(`
-      INSERT INTO sessions (session_id, channel_token, cwd, pid, started_at, status)
-      VALUES ($session_id, $channel_token, $cwd, $pid, $started_at, 'active')
+      INSERT INTO sessions (session_id, channel_token, cwd, pid, started_at, account_hint, status)
+      VALUES ($session_id, $channel_token, $cwd, $pid, $started_at, $account_hint, 'active')
     `);
     stmt.run({
       $session_id: input.session_id,
@@ -115,10 +119,37 @@ export class Db {
       $cwd: input.cwd,
       $pid: input.pid,
       $started_at: input.started_at,
+      $account_hint: accountHint,
     });
     const row = this.getSessionById(input.session_id);
     if (!row) throw new Error("session insert failed");
     return row;
+  }
+
+  /**
+   * Store or clear the install-scoped account_hint. The row is a singleton
+   * (id=1). Pass `null` to clear. New sessions created after this call
+   * inherit the hint; previously-created sessions are unaffected.
+   */
+  setAccountHint(hint: string | null): void {
+    const ts = Date.now();
+    this.raw
+      .prepare(
+        `INSERT INTO install_meta (id, account_hint, updated_at)
+         VALUES (1, $hint, $ts)
+         ON CONFLICT(id) DO UPDATE SET
+           account_hint = excluded.account_hint,
+           updated_at = excluded.updated_at`,
+      )
+      .run({ $hint: hint, $ts: ts });
+  }
+
+  /** Read the install-scoped account_hint (null if unset). */
+  getAccountHint(): string | null {
+    const row = this.raw
+      .prepare("SELECT account_hint FROM install_meta WHERE id = 1")
+      .get() as { account_hint: string | null } | null;
+    return row?.account_hint ?? null;
   }
 
   getSessionById(session_id: string): SessionRow | null {

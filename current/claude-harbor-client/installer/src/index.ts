@@ -4,6 +4,7 @@
  *
  * Usage:
  *   claude-harbor-install install   [--dry-run] [--harbor-url URL] [--home DIR]
+ *                                    [--account-hint auto|skip|manual:VALUE]
  *   claude-harbor-install uninstall [--dry-run] [--home DIR]
  *   claude-harbor-install --version, -v
  *   claude-harbor-install --help, -h
@@ -14,6 +15,11 @@
  *   2 on CLI usage error (unknown command/flag, missing value).
  */
 
+import {
+  captureAccountHint,
+  clearAccountHint,
+  parseAccountHintFlag,
+} from "./account-hint.ts";
 import { parseArgs } from "./argv.ts";
 import { HELP_TEXT, VERSION } from "./help.ts";
 import { runInstall } from "./install.ts";
@@ -56,12 +62,49 @@ export async function main(argv: readonly string[]): Promise<number> {
   const harborUrl = typeof parsed.flags["--harbor-url"] === "string"
     ? parsed.flags["--harbor-url"]
     : undefined;
+  const accountHintRaw = typeof parsed.flags["--account-hint"] === "string"
+    ? parsed.flags["--account-hint"]
+    : undefined;
+  const accountHintMode = parseAccountHintFlag(accountHintRaw);
+  if (accountHintMode === null) {
+    process.stderr.write(
+      `claude-harbor-install: --account-hint value must be 'auto', 'skip', or 'manual:<value>'.\n`,
+    );
+    return 2;
+  }
 
   if (parsed.command === "install") {
-    return runInstall({ home, harborUrl, dryRun }).code;
+    const result = runInstall({ home, harborUrl, dryRun });
+    if (result.code !== 0) return result.code;
+    // Best-effort account_hint capture after a successful settings.json
+    // write. Dry-run skips the POST entirely.
+    if (!dryRun) {
+      const resolvedUrl = result.harborUrl;
+      if (resolvedUrl) {
+        const adminToken = process.env.HARBOR_ADMIN_TOKEN ?? null;
+        await captureAccountHint({
+          mode: accountHintMode,
+          harborUrl: resolvedUrl,
+          adminToken,
+          stdout: (m) => process.stdout.write(`${m}\n`),
+          stderr: (m) => process.stderr.write(`${m}\n`),
+        });
+      }
+    }
+    return 0;
   }
   if (parsed.command === "uninstall") {
-    return runUninstall({ home, dryRun }).code;
+    const result = runUninstall({ home, dryRun });
+    if (result.code !== 0) return result.code;
+    if (!dryRun && result.harborUrl) {
+      const adminToken = process.env.HARBOR_ADMIN_TOKEN ?? null;
+      await clearAccountHint({
+        harborUrl: result.harborUrl,
+        adminToken,
+        stderr: (m) => process.stderr.write(`${m}\n`),
+      });
+    }
+    return 0;
   }
 
   process.stderr.write(

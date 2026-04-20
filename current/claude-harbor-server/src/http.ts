@@ -16,6 +16,7 @@ import {
   freshToken,
   isTooLarge,
   jsonResponse,
+  noContent,
   readJson,
   shortId,
   stripControlChars,
@@ -247,6 +248,46 @@ async function handleAdminPush(
   return jsonResponse({ ok: true, delivered });
 }
 
+// --- /admin/account-hint ------------------------------------------------
+
+/** Max raw byte length for an account_hint string. */
+const MAX_ACCOUNT_HINT_CHARS = 512;
+
+async function handleAdminAccountHint(
+  req: Request,
+  db: Db,
+  server: Server<WsData> | null,
+): Promise<Response> {
+  const denied = checkAdminAuth(req, server);
+  if (denied) return denied;
+
+  const body = await readJson(req);
+  if (isTooLarge(body)) return err(413, "payload too large");
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    return err(400, "invalid json");
+  }
+  const b = body as Record<string, unknown>;
+  if (!("account_hint" in b)) {
+    return err(400, "missing account_hint");
+  }
+  const raw = b.account_hint;
+  let hint: string | null;
+  if (raw === null) {
+    hint = null;
+  } else if (typeof raw === "string") {
+    if (raw.length > MAX_ACCOUNT_HINT_CHARS) {
+      return err(400, "account_hint too long");
+    }
+    const cleaned = stripControlChars(raw).trim();
+    hint = cleaned.length > 0 ? cleaned : null;
+  } else {
+    return err(400, "account_hint must be string or null");
+  }
+  db.setAccountHint(hint);
+  log.info("admin: account_hint updated", { set: hint !== null });
+  return noContent();
+}
+
 // --- /admin/session/:id (debug) -----------------------------------------
 
 function handleAdminSession(
@@ -302,6 +343,9 @@ export async function handleHttp(
   }
   if (method === "POST" && path === "/admin/push-message") {
     return handleAdminPush(req, db, server);
+  }
+  if (method === "POST" && path === "/admin/account-hint") {
+    return handleAdminAccountHint(req, db, server);
   }
   if (method === "GET" && path.startsWith("/admin/session/")) {
     const sid = path.slice("/admin/session/".length);

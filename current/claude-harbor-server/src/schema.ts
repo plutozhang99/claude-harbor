@@ -85,6 +85,12 @@ CREATE TABLE IF NOT EXISTS push_subscriptions (
   keys_json TEXT,
   created_at INTEGER
 );
+
+CREATE TABLE IF NOT EXISTS install_meta (
+  id INTEGER PRIMARY KEY CHECK (id = 1),
+  account_hint TEXT,
+  updated_at INTEGER NOT NULL
+);
 `;
 
 /**
