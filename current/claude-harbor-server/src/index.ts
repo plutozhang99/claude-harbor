@@ -12,6 +12,13 @@ import type { WsData } from "./correlate.ts";
 
 export interface StartOptions {
   port?: number;
+  /**
+   * Host to bind. Defaults to `127.0.0.1` per PLAN §12 (P1 hooks are
+   * unauthenticated, so loopback-only is the safe default). Set
+   * `HARBOR_BIND=0.0.0.0` or pass `bind: "0.0.0.0"` to expose more
+   * broadly (e.g. behind a trusted reverse proxy in a container).
+   */
+  bind?: string;
   dbPath?: string;
 }
 
@@ -27,12 +34,14 @@ const WS_MAX_PAYLOAD_BYTES = 4096;
 export function start(opts: StartOptions = {}): HarborHandle {
   const cfg = loadConfig();
   const port = opts.port ?? cfg.port;
+  const bind = opts.bind ?? cfg.bind;
   const dbPath = opts.dbPath ?? cfg.dbPath;
   const db = new Db(dbPath);
   const wsHandler = buildWsHandler(db);
 
   const server: Server<WsData> = Bun.serve<WsData>({
     port,
+    hostname: bind,
     async fetch(req, srv) {
       const url = new URL(req.url);
       if (url.pathname === "/channel" && req.headers.get("upgrade") === "websocket") {
@@ -48,7 +57,11 @@ export function start(opts: StartOptions = {}): HarborHandle {
     },
   });
 
-  log.info("harbor: listening", { port: server.port, dbPath });
+  log.info("harbor: listening", {
+    port: server.port,
+    bind,
+    dbPath,
+  });
   return {
     server,
     db,

@@ -18,8 +18,17 @@ import {
   jsonResponse,
   readJson,
   shortId,
+  stripControlChars,
 } from "./http-utils.ts";
 import { handleChannelReply } from "./http-reply.ts";
+import {
+  handleNotification,
+  handlePostToolUse,
+  handlePreToolUse,
+  handleSessionEnd,
+  handleStop,
+  handleUserPromptSubmit,
+} from "./http-hooks.ts";
 
 export { MAX_BODY_BYTES };
 
@@ -71,8 +80,8 @@ async function handleSessionStart(req: Request, db: Db): Promise<Response> {
   log.info("session-start", {
     session_id: shortId(session_id),
     pid,
-    cwd,
-    transcript_path,
+    cwd: stripControlChars(cwd),
+    transcript_path: transcript_path ? stripControlChars(transcript_path) : null,
   });
   return jsonResponse({ channel_token: row.channel_token });
 }
@@ -156,7 +165,9 @@ async function handleStatusline(req: Request, db: Db): Promise<Response> {
       });
     }
   } else {
-    log.warn("statusline: no matching session", { cwd: parsed.snap.cwd });
+    log.warn("statusline: no matching session", {
+      cwd: parsed.snap.cwd ? stripControlChars(parsed.snap.cwd) : null,
+    });
   }
   return jsonResponse({ line: parsed.line, matched });
 }
@@ -264,6 +275,24 @@ export async function handleHttp(
 
   if (method === "POST" && path === "/hooks/session-start") {
     return handleSessionStart(req, db);
+  }
+  if (method === "POST" && path === "/hooks/user-prompt-submit") {
+    return handleUserPromptSubmit(req, db);
+  }
+  if (method === "POST" && path === "/hooks/pre-tool-use") {
+    return handlePreToolUse(req, db);
+  }
+  if (method === "POST" && path === "/hooks/post-tool-use") {
+    return handlePostToolUse(req, db);
+  }
+  if (method === "POST" && path === "/hooks/stop") {
+    return handleStop(req, db);
+  }
+  if (method === "POST" && path === "/hooks/session-end") {
+    return handleSessionEnd(req, db);
+  }
+  if (method === "POST" && path === "/hooks/notification") {
+    return handleNotification(req, db);
   }
   if (method === "POST" && path === "/statusline") {
     return handleStatusline(req, db);

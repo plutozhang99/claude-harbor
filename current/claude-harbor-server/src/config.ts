@@ -6,6 +6,13 @@
 const DEFAULT_PORT = 7823;
 const DEFAULT_DB_PATH = "./data/harbor.db";
 const DEFAULT_CORR_WINDOW_MS = 10_000;
+/**
+ * Bind default per PLAN §12: P1 hooks are unauthenticated; keep the
+ * socket loopback-only unless the operator explicitly opts into a wider
+ * bind via `HARBOR_BIND` (e.g. `0.0.0.0` for container deployment behind
+ * a trusted reverse proxy).
+ */
+const DEFAULT_BIND = "127.0.0.1";
 
 /**
  * 10s correlation window per PLAN §4 (can be overridden via env for tests).
@@ -31,14 +38,22 @@ function parseCorrWindow(raw: string | undefined): number {
 
 export interface Config {
   readonly port: number;
+  readonly bind: string;
   readonly dbPath: string;
   readonly corrWindowMs: number;
   readonly adminToken: string | null;
 }
 
+function parseBind(raw: string | undefined): string {
+  const v = raw?.trim();
+  if (!v) return DEFAULT_BIND;
+  return v;
+}
+
 export function loadConfig(): Config {
   return Object.freeze({
     port: parsePort(process.env.HARBOR_PORT),
+    bind: parseBind(process.env.HARBOR_BIND),
     dbPath: process.env.HARBOR_DB_PATH ?? DEFAULT_DB_PATH,
     corrWindowMs: parseCorrWindow(process.env.HARBOR_CORR_WINDOW_MS),
     adminToken: process.env.HARBOR_ADMIN_TOKEN?.length

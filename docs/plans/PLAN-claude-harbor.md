@@ -209,3 +209,16 @@ Fixed at kickoff:
 - `--dangerously-load-development-channels` requirement during development: confirm whether the install script needs to toggle this or whether local registration bypasses allowlist.
 - Statusline refresh rate and whether a 300ms debounce causes missed push triggers (probably fine, flag for P3 review).
 - Web Push on iOS 16.4+ PWA: confirm VAPID flow works for user's phone specifically before P4.
+
+---
+
+## 12. Security (P1)
+
+P1 is single-user and explicitly internal-network only. Concretely:
+
+- `/hooks/*` endpoints are **unauthenticated**. A process that can reach the server's TCP socket can write audit rows for any `session_id` that exists.
+- Default bind is `127.0.0.1`. Set `HARBOR_BIND=0.0.0.0` (or equivalent in a container) only when fronted by a trusted reverse proxy you control.
+- `/admin/*` is gated by loopback-only OR the `HARBOR_ADMIN_TOKEN` env (constant-time compare).
+- Body cap: 64 KiB enforced via streaming reader, so a malicious client cannot exhaust memory by omitting `Content-Length`.
+- Message retention: indefinite for P1. Retention policy tracked for P5.
+- Proper per-user auth on hooks, tenant scoping, and ACLs are **P5**. Do not widen the bind without that in place.

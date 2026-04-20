@@ -14,7 +14,7 @@ type BindValue = string | number | bigint | boolean | null | Uint8Array;
 type BindMap = Record<string, BindValue>;
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
-import { SCHEMA_SQL } from "./schema.ts";
+import { SCHEMA_SQL, MIGRATIONS } from "./schema.ts";
 
 export type SessionStatus = "active" | "idle" | "ended" | "unbound";
 
@@ -27,6 +27,7 @@ export interface SessionRow {
   account_hint: string | null;
   started_at: number | null;
   ended_at: number | null;
+  ended_reason: string | null;
   latest_model: string | null;
   latest_model_display: string | null;
   latest_ctx_pct: number | null;
@@ -74,8 +75,23 @@ export class Db {
     }
     this.raw = new Database(path);
     this.raw.exec("PRAGMA journal_mode = WAL;");
+    // Enforce FKs so rogue hook writes with a bad session_id cannot
+    // leave orphan rows in `messages` / `tool_events`. Must be set per
+    // connection (not per database) for bun:sqlite.
     this.raw.exec("PRAGMA foreign_keys = ON;");
     this.raw.exec(SCHEMA_SQL);
+    // Idempotent additive migrations. Each may throw "duplicate column
+    // name" on repeat boots; that's expected and safe to swallow.
+    for (const sql of MIGRATIONS) {
+      try {
+        this.raw.exec(sql);
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        if (!/duplicate column name/i.test(msg)) {
+          throw e;
+        }
+      }
+    }
   }
 
   close(): void {
@@ -211,15 +227,25 @@ export class Db {
   /**
    * Insert a message row (inbound or outbound). Returns the new row id.
    * `meta` is serialized to JSON (empty object when undefined).
+   *
+   * The `meta` arg here accepts string-valued records (for outbound reply
+   * meta validated against per-key caps). Hook handlers that persist the
+   * full raw payload pass it as pre-serialized JSON via `metaJson`.
    */
   insertMessage(input: {
     session_id: string;
     direction: "inbound" | "outbound";
     content: string;
     meta?: Record<string, string>;
+    metaJson?: string | null;
     created_at: number;
   }): number {
-    const metaJson = input.meta ? JSON.stringify(input.meta) : null;
+    const metaJson =
+      input.metaJson !== undefined
+        ? input.metaJson
+        : input.meta
+          ? JSON.stringify(input.meta)
+          : null;
     const result = this.raw
       .prepare(
         `INSERT INTO messages (session_id, direction, content, meta_json, created_at)
@@ -233,5 +259,61 @@ export class Db {
         $ts: input.created_at,
       });
     return Number(result.lastInsertRowid);
+  }
+
+  /**
+   * Insert a tool_events audit row. `tool_input_json` and
+   * `tool_output_json` are expected to be already-serialized JSON strings
+   * (or null). Callers build them from raw payload fields.
+   */
+  insertToolEvent(input: {
+    session_id: string;
+    hook_event: string;
+    tool_name: string | null;
+    tool_input_json: string | null;
+    tool_output_json: string | null;
+    permission_mode: string | null;
+    created_at: number;
+  }): number {
+    const result = this.raw
+      .prepare(
+        `INSERT INTO tool_events
+           (session_id, hook_event, tool_name, tool_input_json, tool_output_json, permission_mode, created_at)
+         VALUES ($sid, $event, $tname, $tin, $tout, $pmode, $ts)`,
+      )
+      .run({
+        $sid: input.session_id,
+        $event: input.hook_event,
+        $tname: input.tool_name,
+        $tin: input.tool_input_json,
+        $tout: input.tool_output_json,
+        $pmode: input.permission_mode,
+        $ts: input.created_at,
+      });
+    return Number(result.lastInsertRowid);
+  }
+
+  /**
+   * Mark a session as ended. Returns true if a row was updated, false if
+   * the session_id was unknown. Idempotent: calling twice on the same
+   * session still returns true and refreshes `ended_at` and `ended_reason`.
+   *
+   * `reason` is the CC SessionEnd `reason` field ("clear" | "logout" |
+   * "prompt_input_exit" | "other" | any future string). Pass `null` to
+   * clear, `undefined` to preserve any previously-recorded value — we
+   * currently always overwrite because the second SessionEnd call carries
+   * the more recent reason.
+   */
+  markSessionEnded(
+    session_id: string,
+    ts: number,
+    reason: string | null = null,
+  ): boolean {
+    const result = this.raw
+      .prepare(
+        "UPDATE sessions SET status = 'ended', ended_at = $ts, ended_reason = $reason WHERE session_id = $sid",
+      )
+      .run({ $ts: ts, $reason: reason, $sid: session_id });
+    return result.changes > 0;
   }
 }
