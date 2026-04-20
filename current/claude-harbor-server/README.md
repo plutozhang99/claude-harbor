@@ -103,9 +103,12 @@ docker compose down -v
 | Var | Default | Purpose |
 |---|---|---|
 | `HARBOR_PORT` | `7823` | HTTP + WS listen port. |
+| `HARBOR_BIND` | `127.0.0.1` | Bind host. Non-loopback requires `HARBOR_ADMIN_TOKEN` (or `HARBOR_ALLOW_UNSAFE_BIND=1`). |
 | `HARBOR_DB_PATH` | `./data/harbor.db` (Bun) / `/app/data/harbor.db` (Docker) | SQLite file. |
-| `HARBOR_ADMIN_TOKEN` | *(unset)* | Shared secret for `/admin/*`. Required for any non-loopback admin caller. |
+| `HARBOR_ADMIN_TOKEN` | *(unset)* | Shared secret for `/admin/*` and `WS /subscribe`. Required for any non-loopback admin caller. |
 | `HARBOR_CORR_WINDOW_MS` | `10000` | WS handshake + pending-session correlation window. |
+| `HARBOR_FRONTEND_ROOT` | *(unset)* | Override for the Flutter `build/web/` directory. Falls back to `../claude-harbor-frontend/build/web/`. |
+| `HARBOR_DEV` | *(unset)* | When `1` on a loopback bind, enables permissive CORS on GET only (for dev against `flutter run -d chrome`). Never applies to POST. |
 
 ---
 
@@ -130,6 +133,37 @@ SQLite is a single file. Back it up with `sqlite3 harbor.db ".backup
 stopped. If you're running Docker, the volume lives under
 `/var/lib/docker/volumes/claude-harbor-server_harbor-data/` on the host
 (or inspect via `docker volume inspect claude-harbor-server_harbor-data`).
+
+---
+
+## Frontend integration
+
+The server serves the Flutter PWA at `/` when a build exists at
+`../claude-harbor-frontend/build/web/index.html`. Override the path with
+`HARBOR_FRONTEND_ROOT=/abs/path/to/build/web`.
+
+Behavior:
+
+- `GET /` → `index.html` with `Content-Security-Policy`,
+  `X-Content-Type-Options: nosniff`, and `Referrer-Policy: no-referrer`.
+- Real asset paths → served with the correct MIME (JS, CSS, Wasm, SVG,
+  PNG, ICO, fonts, etc.) and `nosniff`.
+- Unknown non-asset GETs → SPA fallthrough to `index.html` so
+  Flutter-web client-side routing works.
+- Paths under `/api/*` → never SPA-fall-through; caller gets a real 404.
+- When no bundle is present, `GET /` returns `{"frontend":"not built yet"}`
+  and all other paths 404.
+
+Frontend build helper lives at the repo root:
+`./scripts/build-frontend.sh` (builds the Flutter bundle) and
+`./scripts/dev.sh` (builds + runs the server).
+
+### `/subscribe` admin gate
+
+The frontend-facing `WS /subscribe` channel uses the same admin auth as
+`/admin/*`: loopback-only when `HARBOR_ADMIN_TOKEN` is unset, header-gated
+(`X-Harbor-Admin-Token`) when it is set. Broadcast frames never include
+`channel_token` (C1 guard — see `src/db-queries.ts#toPublicSessionRow`).
 
 ---
 

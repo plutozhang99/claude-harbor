@@ -14,14 +14,15 @@
  */
 
 import { existsSync, statSync } from "node:fs";
-import { extname, join, normalize, resolve, sep } from "node:path";
+import { extname, isAbsolute, join, normalize, resolve, sep } from "node:path";
 import { log } from "./config.ts";
 import { err, jsonResponse } from "./http-utils.ts";
 
 /**
  * Default location of the Flutter build relative to the repo root. The
  * server entry point can override this if needed (e.g. containers that
- * COPY the bundle to a different path).
+ * COPY the bundle to a different path), or operators can override at
+ * runtime via `HARBOR_FRONTEND_ROOT`.
  */
 export const DEFAULT_FRONTEND_BUILD_DIR = resolve(
   import.meta.dir,
@@ -31,6 +32,68 @@ export const DEFAULT_FRONTEND_BUILD_DIR = resolve(
   "build",
   "web",
 );
+
+/**
+ * Resolve the build directory in priority order:
+ *   1. explicit `buildDir` arg (used by tests + `start({frontendBuildDir})`)
+ *   2. `process.env.HARBOR_FRONTEND_ROOT` (operator override at runtime)
+ *   3. `DEFAULT_FRONTEND_BUILD_DIR` co-located with the frontend package
+ *
+ * Returns the resolved absolute path plus a flag indicating whether the env
+ * var was the source (so the caller can emit the right log level).
+ */
+function resolveBuildDir(buildDir?: string): { path: string; isExplicit: boolean } {
+  if (buildDir && buildDir.length > 0) {
+    return { path: resolve(buildDir), isExplicit: false };
+  }
+  const env = process.env.HARBOR_FRONTEND_ROOT;
+  const trimmed = env ? env.trim() : "";
+  if (trimmed.length > 0) {
+    if (!isAbsolute(trimmed)) {
+      throw new Error(
+        `HARBOR_FRONTEND_ROOT must be an absolute path; got "${trimmed}"`,
+      );
+    }
+    return { path: resolve(trimmed), isExplicit: true };
+  }
+  return { path: DEFAULT_FRONTEND_BUILD_DIR, isExplicit: false };
+}
+
+/**
+ * URL path prefixes that must NEVER fall through to the SPA index.html.
+ * These are API / WS routes — a missing `/api/foo` or an un-upgraded
+ * GET on `/subscribe` should be a real 404, not the SPA shell. The list
+ * matches the router in `http.ts`; keep them in sync if new routes land.
+ *
+ * Note: `/sessions` is intentionally absent. It is both a REST endpoint
+ * and a valid Flutter client-side route (`/sessions/:id`). The REST
+ * handler runs first in the router and returns 400/404/200 on its own,
+ * so by the time the static layer sees it, only truly unknown shapes
+ * remain — those should fall through to the SPA so deep-link routes
+ * work on refresh.
+ *
+ * TODO(P3): keep in sync with http.ts bindings — consider centralizing in P3.
+ */
+const API_PATH_PREFIXES: readonly string[] = [
+  "/api/",
+  "/hooks/",
+  "/admin/",
+  "/channel/",
+  "/subscribe",
+  "/statusline",
+  "/health",
+];
+
+function isReservedApiPath(path: string): boolean {
+  for (const p of API_PATH_PREFIXES) {
+    if (p.endsWith("/")) {
+      if (path === p.slice(0, -1) || path.startsWith(p)) return true;
+    } else {
+      if (path === p || path.startsWith(p + "/")) return true;
+    }
+  }
+  return false;
+}
 
 const MIME_BY_EXT: Record<string, string> = {
   ".html": "text/html; charset=utf-8",
@@ -65,10 +128,8 @@ export interface StaticServer {
 }
 
 /** Factory: resolves whether the bundle exists and returns a server. */
-export function createStaticServer(
-  buildDir: string = DEFAULT_FRONTEND_BUILD_DIR,
-): StaticServer {
-  const rootAbs = resolve(buildDir);
+export function createStaticServer(buildDir?: string): StaticServer {
+  const { path: rootAbs, isExplicit } = resolveBuildDir(buildDir);
   const indexPath = join(rootAbs, "index.html");
   const available = (() => {
     try {
@@ -80,6 +141,12 @@ export function createStaticServer(
 
   if (available) {
     log.info("static: frontend build detected", { path: rootAbs });
+  } else if (isExplicit) {
+    // M5: operator explicitly set HARBOR_FRONTEND_ROOT but the build isn't there.
+    log.warn(
+      "static: HARBOR_FRONTEND_ROOT set but build not found — serving JSON stub",
+      { path: rootAbs },
+    );
   } else {
     log.info("static: no frontend build found — serving JSON stub", {
       path: rootAbs,
@@ -100,6 +167,9 @@ export function createStaticServer(
         // Only claim `/` when stub — let the API router 404 the rest.
         return null;
       }
+
+      // Reserved API paths never SPA-fall-through — let the caller 404.
+      if (isReservedApiPath(path)) return null;
 
       // Try to resolve to a real file on disk within `rootAbs`.
       const resolvedFile = resolveAssetPath(rootAbs, path);
@@ -200,5 +270,7 @@ async function serveFile(absPath: string): Promise<Response> {
 export const __test = {
   resolveAssetPath,
   pathLooksLikeAsset,
+  isReservedApiPath,
+  resolveBuildDir,
   MIME_BY_EXT,
 };
