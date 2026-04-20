@@ -31,7 +31,7 @@ YES — `docs/DESIGN.md` (Mistral warm palette). All UI work in P2 MUST follow i
 ## Current Phase: P2 — Flutter frontend scaffold
 
 ## Interruption Reason
-<!-- empty -->
+rate-limit — P2.3 implementation complete on disk (68/68 tests pass, `flutter analyze` clean) but **not committed**. Both parallel reviewers (flutter + functional-coverage) hit their quota before producing output (resets 2pm America/Toronto 2026-04-20). On resume: re-dispatch the two P2.3 reviewers, run fix pass on any blockers, then commit. Code is uncommitted on `main` — run `git status` to confirm untracked files before touching anything.
 
 
 ## Review Roster (fixed at kickoff)
@@ -100,6 +100,20 @@ YES — `docs/DESIGN.md` (Mistral warm palette). All UI work in P2 MUST follow i
 - Update README with P2 dev workflow.
 
 ## What's Done
+- [x] **P2.2** Flutter data layer — commit `aa0c95d` — flutter ✅ sec ✅ func ✅
+  - Immutable models (`Session`, `Message`, `Statusline`, `RateLimits`/`RateWindow`) with strict `fromJson` on required fields + defensive coercion on optional.
+  - `HarborApiClient` (listSessions / getSession+counts / listMessages pagination / postChannelReply) with structured `Uri.replace`, 10 s timeout, `HarborApiException` truncating body.
+  - `HarborLiveService` with `sealed HarborEvent` hierarchy (`SessionCreated|Updated|Ended`, `MessageCreated`, `StatuslineUpdated`, `SubscribedAck`, `ConnectionStateChanged`), exponential backoff 2→30 s with `_reconnectPending` debounce (reset ONLY after decoded+emitted event), 45 s heartbeat watchdog, malformed frames caught so subscription survives, unknown events logged.
+  - `SessionRepository.watchList` merges REST with live events (created=upsert, updated=replace, ended=patch via injected clock, statusline=patch latest_*), re-fetches on reconnect to close ended-during-gap race, stable sort `latestStatuslineAt desc nulls-last, startedAt desc, sessionId desc`, cancel-during-init leak fixed.
+  - `MessageRepository.watchInbox` filters `MessageCreated` by `sessionId`.
+  - Riverpod providers: `harborBaseUri` (throws on non-http(s) scheme with override hint), `harborWsUri` (scheme swap + fragment clear), api client + live service with `unawaited()` start/stop, session/message repos, `sessionListProvider` / `sessionDetailProvider` / `messageInboxProvider`.
+  - 51 tests pass, `flutter analyze` clean.
+- [x] **P2.1** Flutter scaffold + Mistral theme — commit `e84123f` — flutter ✅ func ✅
+  - `current/claude-harbor-frontend/` web-only Flutter 3.x, Riverpod 2.5 root, flutter_lints 6, SDK `>=3.4.0 <4.0.0`.
+  - Mistral theme: 13 color tokens (`kMistralOrange`, `kMistralFlame`, `kBlockOrange`, `kSunshine900/700/500/300`, `kBlockGold`, `kBrightYellow`, `kWarmIvory`, `kCream`, `kMistralBlack`, `kInputBorder`), `mistralGoldenShadows` 5-layer amber cascade, `mistralLightTheme` with EVERY `ColorScheme` role pinned warm (secondary, tertiary, inverse*, shadow/scrim, outlineVariant, surfaceTint — no cool M3 seed leak), weight-400 TextTheme at 82/56/48/32/30/24/16/14, `fontFamily: 'Arial'`, `BorderRadius.zero` everywhere, dark-solid/cream/ghost button variants themed.
+  - Diagnostic `PaletteShowcase` with 14 color swatches (Pure White border, dark swatches flip label to ivory), Mistral block gradient, golden-shadow card, button row. Responsive 24/64 padding via `LayoutBuilder`.
+  - All text resolved via `Theme.of(context).textTheme` so Arial inherits. `Opacity` widgets replaced by `Color.withValues(alpha:)`.
+  - `flutter analyze` clean, `flutter test` 1/1 pass. No cool colors, no bold weights, no rounded corners (verified by reviewer grep).
 - [x] **P2.0** Server API prep — commit `c9b4e4d` — code ✅ sec ✅ func ✅
   - `GET /sessions`, `/sessions/:id`, `/sessions/:id/messages` with `PublicSessionRow` projection (channel_token stripped). Token remains only for `WS /channel` bind, `POST /channel/reply` constant-time auth, and `GET /admin/session/:id` (admin-gated).
   - `WS /subscribe` admin-gated, snapshot replay (100-row + 256 KiB cap), fans out `session.created|updated|ended`, `message.created`, `statusline.updated` via in-process `EventBus` with 32-subscriber cap and 1 MB per-socket backpressure close.
@@ -109,7 +123,10 @@ YES — `docs/DESIGN.md` (Mistral warm palette). All UI work in P2 MUST follow i
   - Tests: 139 pass / 0 fail, tsc clean. Round-1 security BLOCK on C1 (channel_token leak) closed in round-2.
 
 ## Next Steps
-- [ ] **P2.1** Flutter scaffold + Mistral theme
+- [~] **P2.3 IMPL DONE, REVIEWS BLOCKED** — 68/68 tests pass, `flutter analyze` clean, uncommitted. Files on disk: `lib/screens/session_list_screen.dart` (216), `lib/screens/session_detail_placeholder.dart` (35), `lib/screens/sessions/session_tile.dart` (232), `lib/screens/sessions/_skeleton_tile.dart` (51), `lib/widgets/section_label.dart` (26, promoted), `lib/screens/showcase/section_label.dart` (3, re-export shim), `test/screens/session_list_screen_test.dart` (144), `test/screens/session_tile_test.dart` (135). `lib/main.dart` switched `home:` to `SessionListScreen`. `pubspec.yaml` added `path: ^1.9.0`.
+- [ ] **P2.3 REVIEWS** — re-dispatch flutter-reviewer + functional-coverage after 2pm Toronto quota reset. Any blockers → fix pass. Then commit with haiku.
+- [ ] **P2.4** Session detail screen
+- [ ] **P2.5** Build integration + smoke test
 - [ ] **P2.2** Data layer (models, REST, WS subscribe)
 - [ ] **P2.3** Session list screen
 - [ ] **P2.4** Session detail screen
@@ -124,6 +141,16 @@ YES — `docs/DESIGN.md` (Mistral warm palette). All UI work in P2 MUST follow i
 - **P2 blocks P3 (Web Push)** — don't start P3 until frontend shell exists to install the service worker.
 
 ## Next Agent Prompt
+> **P2.3 RESUME — re-dispatch reviewers.** P2.3 session list screen is implemented and on disk at `current/claude-harbor-frontend/` but uncommitted (see "P2.3 IMPL DONE" block above for the file list). 68/68 tests pass, `flutter analyze` clean. Both previous parallel reviewers (flutter-reviewer + functional-coverage) hit quota before producing output.
+>
+> Re-run the two reviewers in parallel (opus for flutter-reviewer, sonnet for functional-coverage). Briefs are in the prior turn of this conversation, but if restarting fresh, the essentials:
+> - **flutter-reviewer (opus):** DESIGN.md compliance blockers (cool colors / bold weights / rounded corners / inline TextStyle bypassing Arial), Flutter idioms (ConsumerWidget vs StatefulWidget, ref.invalidate vs ref.refresh on StreamProvider, RefreshIndicator wiring, path.basename safety, InkWell hover cleanup), null-safety (substring guard when sessionId < 8 chars), a11y (Semantics on status dot + tile), tests pattern (overrideWith on sessionListProvider). Files: `lib/main.dart`, `lib/screens/session_list_screen.dart`, `lib/screens/session_detail_placeholder.dart`, `lib/screens/sessions/{session_tile,_skeleton_tile}.dart`, `lib/widgets/section_label.dart`, plus the 2 new test files. Output severity-ranked findings with verdict PASS | PASS-with-MEDIUM | BLOCK.
+> - **functional-coverage (sonnet):** per-deliverable checklist from the P2.3 block in this file: main.dart home swap, AppBar title, loading/error/empty/data branches, responsive padding, session tile (title/model/status dot/ctx bar/5h-7d/cost/hover/border), skeleton tile, detail placeholder, 2 test files, pubspec path dep.
+>
+> After reviews: consolidate findings into one fix pass (opus), run narrow round-2 re-check, commit with haiku, then proceed to P2.4.
+>
+> --- (historical P2.1 implementation prompt preserved for archival) ---
+>
 > **P2.1 — Flutter scaffold + Mistral theme.** Initialize a new Flutter project at `current/claude-harbor-frontend/` (web target first; mobile platforms wait for P4). Read `docs/plans/PLAN-claude-harbor.md` §9 P2, `docs/DESIGN.md` (full — it is binding), and `docs/progress/PROGRESS.md` "P2.1" spec. No data layer yet (P2.2), no screens yet (P2.3), no build integration yet (P2.5).
 >
 > Deliverables:

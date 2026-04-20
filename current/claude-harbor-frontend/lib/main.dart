@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import 'screens/palette_showcase.dart';
+import 'screens/session_list_screen.dart';
 import 'theme/mistral_theme.dart';
 
 void main() {
@@ -17,7 +17,7 @@ class HarborApp extends StatelessWidget {
       title: 'Claude Harbor',
       debugShowCheckedModeBanner: false,
       theme: mistralLightTheme,
-      home: const PaletteShowcase(),
+      home: const SessionListScreen(),
     );
   }
 }
