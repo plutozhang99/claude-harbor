@@ -254,6 +254,7 @@ ThemeData _buildMistralLightTheme() {
     useMaterial3: true,
     colorScheme: scheme,
     fontFamily: 'Arial',
+    fontFamilyFallback: const ['NotoSansSC', 'NotoEmoji'],
     scaffoldBackgroundColor: kWarmIvory,
     textTheme: _buildTextTheme(),
     elevatedButtonTheme: _buildElevatedButtonTheme(),
