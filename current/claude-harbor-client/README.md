@@ -32,40 +32,64 @@ between them is the HTTP + WS protocol exposed by the server.
 
 ## Install
 
-### 1. Install dependencies for each package
+### Quick (recommended)
+
+One script handles prerequisite checks, dependency install, global linking,
+and settings.json wiring:
 
 ```bash
+./install.sh http://<server-host>:7823
+```
+
+Or interactive (prompts for the URL):
+
+```bash
+./install.sh
+```
+
+Preview without changing anything:
+
+```bash
+./install.sh --dry-run --harbor-url http://<server-host>:7823
+```
+
+Re-runs are safe — every step is idempotent. After it finishes, add the
+printed `export HARBOR_URL=…` line to your shell profile and open a new
+shell.
+
+### Manual (if you prefer)
+
+```bash
+# 1. deps
 for pkg in wrapper proxy hook statusline installer; do
   (cd "$pkg" && bun install)
 done
-```
 
-### 2. Link the CLIs onto PATH
-
-```bash
+# 2. expose each package's bin
 for pkg in wrapper hook statusline installer; do
   (cd "$pkg" && bun link)
 done
 
+# 3. link the shims onto PATH
 for pkg in claude-harbor claude-harbor-hook claude-harbor-statusline claude-harbor-install; do
   bun link "$pkg"
 done
-```
 
-Confirm:
-
-```bash
+# 4. confirm
 claude-harbor --version
 claude-harbor-install --help
+
+# 5. write settings.json
+claude-harbor-install install --harbor-url http://<server-host>:7823
 ```
 
-If `command not found`, add Bun's global bin dir to PATH:
+If `command not found` after linking, add Bun's global bin dir to PATH:
 
 ```bash
 export PATH="$(bun pm -g bin):$PATH"
 ```
 
-### 3. Export `HARBOR_URL`
+### Export `HARBOR_URL`
 
 The hook, statusline, and channel proxy all read `HARBOR_URL` at runtime.
 Put it in your shell profile so every CC invocation inherits it:
@@ -130,15 +154,18 @@ Everything else behaves like plain `claude`.
 ## Uninstall
 
 ```bash
-claude-harbor-install uninstall
+./uninstall.sh
 ```
 
-Removes only the entries the sidecar records as ours — anything you've
-added or modified is left alone (with a stderr warning).
+Reverses `install.sh`: removes settings.json entries via
+`claude-harbor-install uninstall`, unlinks all shims, and de-registers each
+package. `node_modules/` is left in place (remove by hand if you want a
+full purge).
 
-Unlink the CLIs:
+Manual equivalent:
 
 ```bash
+claude-harbor-install uninstall
 for pkg in claude-harbor claude-harbor-hook claude-harbor-statusline claude-harbor-install; do
   bun unlink "$pkg" || true
 done
