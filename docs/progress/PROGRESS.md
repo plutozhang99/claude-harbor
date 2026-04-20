@@ -31,7 +31,8 @@ YES — `docs/DESIGN.md` (Mistral warm palette). All UI work in P2 MUST follow i
 ## Current Phase: P2 — Flutter frontend scaffold
 
 ## Interruption Reason
-rate-limit-5h — opus sub-agent hit its 5h limit mid-P2.0 (resets 3am America/Toronto on 2026-04-20). Implementation is on disk, 3 WS fan-out tests are still failing; resume by dispatching a sonnet fix agent against the 3 failures, then run reviews.
+<!-- empty -->
+
 
 ## Review Roster (fixed at kickoff)
 - Code Review (backend): typescript-reviewer
@@ -99,17 +100,15 @@ rate-limit-5h — opus sub-agent hit its 5h limit mid-P2.0 (resets 3am America/T
 - Update README with P2 dev workflow.
 
 ## What's Done
-- [~] **P2.0 (PARTIAL)** Server API prep — code landed, 3 WS fan-out tests failing, reviews pending.
-  - New src files: `http-sessions.ts` (5.9K), `ws-subscribe.ts` (4.1K), `event-bus.ts` (4.7K), `http-static.ts` (5.5K), `db-queries.ts` (4.0K), `http-admin.ts` (4.7K), `http-reply.ts` (4.6K) — split from the old monolithic `http.ts`.
-  - Modified: `src/http.ts`, `src/db.ts`, `src/http-hooks.ts`, `src/index.ts`, `src/correlate.ts`.
-  - New test files: `server.p2-sessions.test.ts`, `server.subscribe.test.ts`, `server.static.test.ts`, `server.cors.test.ts`.
-  - Results: `bun tsc --noEmit` ✅ clean; `bun test` = 123 pass / 3 fail.
-  - **Failing tests** (all timeouts, `server.subscribe.test.ts`): "creating a session fans out session.created", "/statusline fans out statusline.updated", "/hooks/session-end fans out session.ended". Likely missing emit calls on EventBus from the corresponding handlers, OR subscriber set not receiving because bus instance is not shared.
-  - Not committed yet. Fix first → reviews → commit.
+- [x] **P2.0** Server API prep — commit `c9b4e4d` — code ✅ sec ✅ func ✅
+  - `GET /sessions`, `/sessions/:id`, `/sessions/:id/messages` with `PublicSessionRow` projection (channel_token stripped). Token remains only for `WS /channel` bind, `POST /channel/reply` constant-time auth, and `GET /admin/session/:id` (admin-gated).
+  - `WS /subscribe` admin-gated, snapshot replay (100-row + 256 KiB cap), fans out `session.created|updated|ended`, `message.created`, `statusline.updated` via in-process `EventBus` with 32-subscriber cap and 1 MB per-socket backpressure close.
+  - Static serve at `/` with SPA fallthrough and CSP/nosniff/referrer-policy HTML headers; JSON stub when bundle missing.
+  - CORS: disabled by default; `HARBOR_DEV=1` + loopback → GET-only, specific-origin (no `*`), `content-type` allow-header only.
+  - `start()` refuses non-loopback bind without `HARBOR_ADMIN_TOKEN` (escape hatch: `HARBOR_ALLOW_UNSAFE_BIND=1`). `pending` map capped at 1000 with oldest-eviction warn. `getMessageById` scoped by session_id. `requireJsonContentTypeIfPresent` on statusline/reply/admin POSTs.
+  - Tests: 139 pass / 0 fail, tsc clean. Round-1 security BLOCK on C1 (channel_token leak) closed in round-2.
 
 ## Next Steps
-- [ ] **P2.0 FIX** Diagnose the 3 WS fan-out failures; dispatch sonnet sub-agent (opus 5h quota exhausted until 3am Toronto)
-- [ ] **P2.0 REVIEWS** After green: typescript-reviewer + security-reviewer + functional-coverage in parallel; fix-round ≤3; commit with haiku
 - [ ] **P2.1** Flutter scaffold + Mistral theme
 - [ ] **P2.2** Data layer (models, REST, WS subscribe)
 - [ ] **P2.3** Session list screen
@@ -125,11 +124,40 @@ rate-limit-5h — opus sub-agent hit its 5h limit mid-P2.0 (resets 3am America/T
 - **P2 blocks P3 (Web Push)** — don't start P3 until frontend shell exists to install the service worker.
 
 ## Next Agent Prompt
-> **P2.0 FIX PASS.** Use **sonnet** (opus weekly quota is out until 3am Toronto). Read `docs/progress/PROGRESS.md` "What's Done → P2.0 (PARTIAL)" section. In `current/claude-harbor-server/`: three tests in `test/server.subscribe.test.ts` are timing out — "creating a session fans out session.created", "/statusline fans out statusline.updated", "/hooks/session-end fans out session.ended". Diagnose: (a) verify `src/event-bus.ts` is a shared singleton (or passed through `createServer` context) — not two separate instances between handlers and WS; (b) verify `src/http-hooks.ts::handleSessionStart` (or wherever `createSession` is called) emits `session.created`; (c) verify `/statusline` handler in `http.ts` or `http-reply.ts` emits `statusline.updated`; (d) verify `handleSessionEnd` emits `session.ended`; (e) verify `src/ws-subscribe.ts` actually subscribes to those events and forwards over the WS. Fix with the minimum diff. All 126 tests must pass; `bun tsc --noEmit` must stay clean. Do NOT touch the installer, wrapper, hook binary, statusline binary, or MCP proxy. Do NOT scaffold Flutter. Report the root cause in one sentence and the diff in bullet points.
+> **P2.1 — Flutter scaffold + Mistral theme.** Initialize a new Flutter project at `current/claude-harbor-frontend/` (web target first; mobile platforms wait for P4). Read `docs/plans/PLAN-claude-harbor.md` §9 P2, `docs/DESIGN.md` (full — it is binding), and `docs/progress/PROGRESS.md` "P2.1" spec. No data layer yet (P2.2), no screens yet (P2.3), no build integration yet (P2.5).
 >
-> **After tests are green:** Orchestrator (me) will run parallel typescript-reviewer + security-reviewer + functional-coverage, fix findings, then commit. Do not run reviews yourself.
+> Deliverables:
+> - `flutter create --platforms=web --org dev.harbor claude-harbor-frontend` at `current/claude-harbor-frontend/`. Remove scaffolded iOS/Android/macOS/linux/windows dirs — web-only for now.
+> - `pubspec.yaml`: Flutter SDK constraint `>=3.22.0`, dart `>=3.4.0`, add `flutter_riverpod: ^2.5.1` as only app dep. Dev: `flutter_lints: ^4.0.0`.
+> - `lib/theme/mistral_theme.dart` exporting a `ThemeData mistralLightTheme` with Material 3 seeded from `Color(0xFFfa520f)` then overridden:
+>   - ColorScheme: primary `#fa520f`, onPrimary `#ffffff`, surface `#fffaeb` (Warm Ivory), onSurface `#1f1f1f`, surfaceContainer `#fff0c2` (Cream), outline `hsl(240,5.9%,90%)`.
+>   - Scaffold bg `#fffaeb`. `useMaterial3: true`.
+>   - `TextTheme` with weight 400 everywhere: display 82px / letterSpacing -2.05 / height 1.00; headline 56/48/32; title 30/24; body/label 16px @ 1.5; caption 14px @ 1.43.
+>   - Button styling: sharp corners (`RoundedRectangleBorder(BorderRadius.zero)`), no elevation on ElevatedButton, dark solid variant (`#1f1f1f` bg, white text, 12px padding), cream variant (`#fff0c2` bg, black text).
+>   - CardTheme with `BorderRadius.zero`, background `#fffaeb`, and a 5-layer golden shadow (tokens exposed as `mistralGoldenShadows` list, since Flutter's BoxShadow doesn't chain the way CSS does — consumer code picks the outermost layer or composes multiple BoxShadows in a Container).
+>   - Export const tokens: `kMistralOrange`, `kMistralFlame`, `kMistralBlack`, `kWarmIvory`, `kCream`, `kSunshine700`, `kBrightYellow`, etc.
+> - `lib/main.dart` bootstraps `ProviderScope(child: MaterialApp(theme: mistralLightTheme, home: const PaletteShowcase()))`. No routing yet.
+> - `lib/screens/palette_showcase.dart` — a diagnostic Scaffold rendering: (1) color swatch row (all 11 named tokens with hex labels), (2) Mistral block gradient row (yellow→amber→orange→flame→mistral orange, sharp corners, no gaps), (3) one card with the golden shadow showcasing a 32px title + 16px body, (4) all three button variants (dark solid, cream surface, ghost). This is the visual check that the theme is wired.
+> - `analysis_options.yaml` extending `package:flutter_lints/flutter.yaml`; set `prefer_const_constructors: true`.
+> - `test/theme_test.dart` — one smoke test: instantiates `MaterialApp(theme: mistralLightTheme, home: const PaletteShowcase())`, pumps, and asserts at least one `Text` widget renders. (Ensures the theme compiles and doesn't crash.)
+> - Add `current/claude-harbor-frontend/.gitignore` with standard Flutter ignores (build/, .dart_tool/, .flutter-plugins*, ephemeral, etc).
 >
-> --- (historical P2.0 implementation prompt preserved below for archival) ---
+> Constraints:
+> - NO cool colors (blue/green/purple). NO bold weight (>400). NO rounded corners (all radii = 0).
+> - Font: use system Arial stack via `TextTheme.fontFamily: 'Arial'` with fallback — no custom font asset yet.
+> - All new files ≤400 lines.
+> - No screens or models beyond the showcase. No API client. No WS. No routing.
+> - Do NOT `flutter run` — just ensure `flutter analyze` is clean and `flutter test` passes.
+> - Do NOT touch the server, installer, wrapper, hook binary, statusline binary, or MCP proxy.
+>
+> Acceptance:
+> - `cd current/claude-harbor-frontend && flutter analyze` — no warnings/errors.
+> - `flutter test` — at least the one smoke test passes.
+> - Report: files created, pubspec deps, `flutter analyze` output, `flutter test` output, any deviations from spec.
+>
+> After you finish, orchestrator runs flutter-reviewer + security-reviewer (minimal for a scaffold) + functional-coverage in parallel, fixes findings, then commits with haiku.
+>
+> --- (historical P2.0 implementation prompt preserved for archival) ---
 >
 > Implement P2.0 for claude-harbor. Read `docs/plans/PLAN-claude-harbor.md`, `docs/progress/PROGRESS.md` (Server API Surface + P2.0 section), and the existing `current/claude-harbor-server/src/http.ts`, `src/db.ts`, and `src/http-hooks.ts` first.
 >
